@@ -1,3 +1,5 @@
+use std::mem::{replace, take};
+
 use crate::backend::cpp::generator::CodeGenerator;
 use crate::backend::cpp::stmt::types::*;
 use crate::frontend::parser::ast::*;
@@ -667,9 +669,9 @@ impl CodeGenerator {
                 body,
             } => {
                 let init_code = if let Some(i) = init {
-                    let old_out = std::mem::take(&mut self.output);
+                    let old_out = take(&mut self.output);
                     self.visit_statement(i);
-                    let s = std::mem::replace(&mut self.output, old_out);
+                    let s = replace(&mut self.output, old_out);
                     s.trim().trim_end_matches(';').to_string()
                 } else {
                     "".to_string()
@@ -682,9 +684,9 @@ impl CodeGenerator {
                 };
 
                 let inc_code = if let Some(inc) = increment {
-                    let old_out = std::mem::take(&mut self.output);
+                    let old_out = take(&mut self.output);
                     self.visit_statement(inc);
-                    let s = std::mem::replace(&mut self.output, old_out);
+                    let s = replace(&mut self.output, old_out);
                     s.trim().trim_end_matches(';').to_string()
                 } else {
                     "".to_string()
@@ -714,9 +716,9 @@ impl CodeGenerator {
                 iterable,
                 body,
             } => {
-                let old_out = std::mem::take(&mut self.output);
+                let old_out = take(&mut self.output);
                 self.visit_statement(item_decl);
-                let mut decl_code = std::mem::replace(&mut self.output, old_out);
+                let mut decl_code = replace(&mut self.output, old_out);
                 decl_code = decl_code.trim_end().trim_end_matches(';').to_string();
 
                 let iter_code = self.visit_expression(iterable);
@@ -819,10 +821,7 @@ impl CodeGenerator {
                     self.emit(&format!("throw {};", expr_code));
                 }
             }
-            Stmt::TryCatchStmt {
-                try_block,
-                catches,
-            } => {
+            Stmt::TryCatchStmt { try_block, catches } => {
                 self.emit("try {");
                 self.indent_level += 1;
                 for s in try_block {
@@ -842,7 +841,10 @@ impl CodeGenerator {
                         self.indent_level -= 1;
                         self.emit(&format!("}} catch (const {}* __{}_ptr) {{", cpp_t, c.param));
                         self.indent_level += 1;
-                        self.emit(&format!("const {}& {} = *__{}_ptr;", cpp_t, c.param, c.param));
+                        self.emit(&format!(
+                            "const {}& {} = *__{}_ptr;",
+                            cpp_t, c.param, c.param
+                        ));
                         for s in &c.body {
                             self.visit_statement(s);
                         }
@@ -855,23 +857,38 @@ impl CodeGenerator {
                             self.visit_statement(s);
                         }
                         self.indent_level -= 1;
-                        self.emit(&format!("}} catch (const fast_std::Error* __{}_ptr) {{", c.param));
+                        self.emit(&format!(
+                            "}} catch (const fast_std::Error* __{}_ptr) {{",
+                            c.param
+                        ));
                         self.indent_level += 1;
-                        self.emit(&format!("const fast_std::Error& {} = *__{}_ptr;", c.param, c.param));
+                        self.emit(&format!(
+                            "const fast_std::Error& {} = *__{}_ptr;",
+                            c.param, c.param
+                        ));
                         for s in &c.body {
                             self.visit_statement(s);
                         }
                         self.indent_level -= 1;
-                        self.emit(&format!("}} catch (const std::exception& __{}_ex) {{", c.param));
+                        self.emit(&format!(
+                            "}} catch (const std::exception& __{}_ex) {{",
+                            c.param
+                        ));
                         self.indent_level += 1;
-                        self.emit(&format!("fast_std::Error {} = fast_std::Error(__{}_ex.what());", c.param, c.param));
+                        self.emit(&format!(
+                            "fast_std::Error {} = fast_std::Error(__{}_ex.what());",
+                            c.param, c.param
+                        ));
                         for s in &c.body {
                             self.visit_statement(s);
                         }
                         self.indent_level -= 1;
                         self.emit("} catch (...) {");
                         self.indent_level += 1;
-                        self.emit(&format!("fast_std::Error {} = fast_std::Error(\"Unknown runtime exception\");", c.param));
+                        self.emit(&format!(
+                            "fast_std::Error {} = fast_std::Error(\"Unknown runtime exception\");",
+                            c.param
+                        ));
                         for s in &c.body {
                             self.visit_statement(s);
                         }
@@ -894,5 +911,4 @@ impl CodeGenerator {
             }
         }
     }
-
 }

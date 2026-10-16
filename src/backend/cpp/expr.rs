@@ -1,7 +1,7 @@
 use crate::backend::cpp::generator::CodeGenerator;
 use crate::backend::cpp::stmt::{cpp_safe_name, type_to_cpp};
 use crate::frontend::parser::ast::*;
-
+use std::mem::take;
 impl CodeGenerator {
     pub(crate) fn visit_expression(&mut self, expr: &Expr) -> String {
         match expr {
@@ -114,12 +114,15 @@ impl CodeGenerator {
             }
             Expr::ObjectLiteral(stmts) => {
                 let mut struct_code = "([]() { struct __Anon {\n".to_string();
-                let mut temp_gen = self.fork_child();
-                temp_gen.indent_level = self.indent_level + 1;
-                for s in stmts {
-                    temp_gen.visit_statement(s);
-                }
-                struct_code.push_str(&temp_gen.output);
+                let old_indent = self.indent_level;
+                self.indent_level += 1;
+                let captured = self.capture_output(|gen| {
+                    for s in stmts {
+                        gen.visit_statement(s);
+                    }
+                });
+                self.indent_level = old_indent;
+                struct_code.push_str(&captured);
                 struct_code.push_str(&format!(
                     "{}}}; return std::make_shared<__Anon>(); }}())",
                     "    ".repeat(self.indent_level)
@@ -322,8 +325,15 @@ impl CodeGenerator {
 
                         let matched_target = if is_this && self.in_primitive_impl {
                             self.current_primitive_target.clone()
-                        } else if targets.iter().any(|t| t == &cpp_type || t == &resolved_type) {
-                            Some(if targets.contains(&cpp_type) { cpp_type.clone() } else { resolved_type.clone() })
+                        } else if targets
+                            .iter()
+                            .any(|t| t == &cpp_type || t == &resolved_type)
+                        {
+                            Some(if targets.contains(&cpp_type) {
+                                cpp_type.clone()
+                            } else {
+                                resolved_type.clone()
+                            })
                         } else if targets.contains(&"array".to_string())
                             && (resolved_type == "array"
                                 || resolved_type.starts_with("fast_std::array")
@@ -335,10 +345,15 @@ impl CodeGenerator {
                                 || resolved_type == "char32_t*")
                         {
                             Some("array".to_string())
-                        } else if targets.contains(&"char".to_string()) && (cpp_type == "char" || resolved_type == "char") {
+                        } else if targets.contains(&"char".to_string())
+                            && (cpp_type == "char" || resolved_type == "char")
+                        {
                             Some("char".to_string())
                         } else if targets.contains(&"bool".to_string())
-                            && (cpp_type == "bool" || cpp_type == "flag" || resolved_type == "bool" || resolved_type == "flag")
+                            && (cpp_type == "bool"
+                                || cpp_type == "flag"
+                                || resolved_type == "bool"
+                                || resolved_type == "flag")
                         {
                             Some("bool".to_string())
                         } else {
@@ -375,7 +390,14 @@ impl CodeGenerator {
                         } else if self.raw_pointer_vars.contains(&obj_code) {
                             format!("{}->{}", obj_code, safe_prop)
                         } else if let Some(t) = self.extract_cpp_type_from_expr(object) {
-                            if t.ends_with('*') && t != "char*" && t != "const char*" && t != "char32_t*" && t != "const char32_t*" && t != "str" && t != "ustr" {
+                            if t.ends_with('*')
+                                && t != "char*"
+                                && t != "const char*"
+                                && t != "char32_t*"
+                                && t != "const char32_t*"
+                                && t != "str"
+                                && t != "ustr"
+                            {
                                 format!("{}->{}", obj_code, safe_prop)
                             } else {
                                 format!("{}.{}", obj_code, safe_prop)
@@ -467,42 +489,49 @@ impl CodeGenerator {
                             if parts.len() == 2 && self.enum_types.contains(parts[0]) {
                                 let enum_name = parts[0];
                                 let variant_name = parts[1].trim_end_matches("()");
-                                let mut struct_code = format!("([&]() {{\n    typename {}::{}_Payload __payload;\n", enum_name, variant_name);
-                                let mut temp_gen = self.fork_child();
-                                temp_gen.indent_level = self.indent_level + 1;
-                                for s in stmts {
-                                    match s {
-                                        Stmt::Declaration(Decl::VarDecl {
-                                            name,
-                                            value,
-                                            assign_op,
-                                            ..
-                                        }) => {
-                                            let v = temp_gen.visit_expression(value);
-                                            if !matches!(value, Expr::Default(None)) && v != "{}" {
-                                                let op = if assign_op.is_empty() {
-                                                    "="
-                                                } else {
-                                                    assign_op.as_str()
-                                                };
-                                                temp_gen.emit(&format!(
-                                                    "__payload.{} {} {};",
-                                                    name, op, v
-                                                ));
+                                let mut struct_code = format!(
+                                    "([&]() {{\n    typename {}::{}_Payload __payload;\n",
+                                    enum_name, variant_name
+                                );
+                                let old_indent = self.indent_level;
+                                self.indent_level += 1;
+                                let captured = self.capture_output(|gen| {
+                                    for s in stmts {
+                                        match s {
+                                            Stmt::Declaration(Decl::VarDecl {
+                                                name,
+                                                value,
+                                                assign_op,
+                                                ..
+                                            }) => {
+                                                let v = gen.visit_expression(value);
+                                                if !matches!(value, Expr::Default(None))
+                                                    && v != "{}"
+                                                {
+                                                    let op = if assign_op.is_empty() {
+                                                        "="
+                                                    } else {
+                                                        assign_op.as_str()
+                                                    };
+                                                    gen.emit(&format!(
+                                                        "__payload.{} {} {};",
+                                                        name, op, v
+                                                    ));
+                                                }
+                                            }
+                                            Stmt::ReassignStmt { target, value, op } => {
+                                                let t = gen.visit_expression(target);
+                                                let v = gen.visit_expression(value);
+                                                gen.emit(&format!("__payload.{} {} {};", t, op, v));
+                                            }
+                                            _ => {
+                                                gen.visit_statement(s);
                                             }
                                         }
-                                        Stmt::ReassignStmt { target, value, op } => {
-                                            let t = temp_gen.visit_expression(target);
-                                            let v = temp_gen.visit_expression(value);
-                                            temp_gen
-                                                .emit(&format!("__payload.{} {} {};", t, op, v));
-                                        }
-                                        _ => {
-                                            temp_gen.visit_statement(s);
-                                        }
                                     }
-                                }
-                                struct_code.push_str(&temp_gen.output);
+                                });
+                                self.indent_level = old_indent;
+                                struct_code.push_str(&captured);
                                 struct_code.push_str(&format!(
                                     "{} {} __obj({}::__no_init_t{{}});\n{}__obj.tag = {}::Tag::{};\n{}new (&__obj.storage.v_{}) typename {}::{}_Payload(std::move(__payload));\n{}return __obj;\n{}}}())",
                                     "    ".repeat(self.indent_level + 1),
@@ -522,37 +551,40 @@ impl CodeGenerator {
                             }
                         }
                         let mut struct_code = format!("([&]() {{\n    {} __obj;\n", target_code);
-                        let mut temp_gen = self.fork_child();
-                        temp_gen.indent_level = self.indent_level + 1;
-                        for s in stmts {
-                            match s {
-                                Stmt::Declaration(Decl::VarDecl {
-                                    name,
-                                    value,
-                                    assign_op,
-                                    ..
-                                }) => {
-                                    let v = temp_gen.visit_expression(value);
-                                    if !matches!(value, Expr::Default(None)) && v != "{}" {
-                                        let op = if assign_op.is_empty() {
-                                            "="
-                                        } else {
-                                            assign_op.as_str()
-                                        };
-                                        temp_gen.emit(&format!("__obj.{} {} {};", name, op, v));
+                        let old_indent = self.indent_level;
+                        self.indent_level += 1;
+                        let captured = self.capture_output(|gen| {
+                            for s in stmts {
+                                match s {
+                                    Stmt::Declaration(Decl::VarDecl {
+                                        name,
+                                        value,
+                                        assign_op,
+                                        ..
+                                    }) => {
+                                        let v = gen.visit_expression(value);
+                                        if !matches!(value, Expr::Default(None)) && v != "{}" {
+                                            let op = if assign_op.is_empty() {
+                                                "="
+                                            } else {
+                                                assign_op.as_str()
+                                            };
+                                            gen.emit(&format!("__obj.{} {} {};", name, op, v));
+                                        }
+                                    }
+                                    Stmt::ReassignStmt { target, value, op } => {
+                                        let t = gen.visit_expression(target);
+                                        let v = gen.visit_expression(value);
+                                        gen.emit(&format!("__obj.{} {} {};", t, op, v));
+                                    }
+                                    _ => {
+                                        gen.visit_statement(s);
                                     }
                                 }
-                                Stmt::ReassignStmt { target, value, op } => {
-                                    let t = temp_gen.visit_expression(target);
-                                    let v = temp_gen.visit_expression(value);
-                                    temp_gen.emit(&format!("__obj.{} {} {};", t, op, v));
-                                }
-                                _ => {
-                                    temp_gen.visit_statement(s);
-                                }
                             }
-                        }
-                        struct_code.push_str(&temp_gen.output);
+                        });
+                        self.indent_level = old_indent;
+                        struct_code.push_str(&captured);
                         struct_code.push_str(&format!(
                             "{}return __obj;\n{}}}())",
                             "    ".repeat(self.indent_level + 1),
@@ -589,7 +621,14 @@ impl CodeGenerator {
                 } else if self.raw_pointer_vars.contains(&obj_code) {
                     format!("{}->{}", obj_code, safe_prop)
                 } else if let Some(t) = self.extract_cpp_type_from_expr(object) {
-                    if t.ends_with('*') && t != "char*" && t != "const char*" && t != "char32_t*" && t != "const char32_t*" && t != "str" && t != "ustr" {
+                    if t.ends_with('*')
+                        && t != "char*"
+                        && t != "const char*"
+                        && t != "char32_t*"
+                        && t != "const char32_t*"
+                        && t != "str"
+                        && t != "ustr"
+                    {
                         format!("{}->{}", obj_code, safe_prop)
                     } else {
                         format!("{}.{}", obj_code, safe_prop)
@@ -726,17 +765,20 @@ impl CodeGenerator {
                     "".to_string()
                 };
 
-                let mut temp_gen = self.fork_child();
-                temp_gen.indent_level = self.indent_level + 1;
-                for s in body {
-                    temp_gen.visit_statement(s);
-                }
+                let old_indent = self.indent_level;
+                self.indent_level += 1;
+                let captured = self.capture_output(|gen| {
+                    for s in body {
+                        gen.visit_statement(s);
+                    }
+                });
+                self.indent_level = old_indent;
 
                 format!(
                     "([&]({}){} {{\n{}{}}})",
                     p_list.join(", "),
                     ret_str,
-                    temp_gen.output,
+                    captured,
                     "    ".repeat(self.indent_level)
                 )
             }
@@ -804,7 +846,7 @@ impl CodeGenerator {
                     format!("(({}) ? ({}) : ({}))", cond_code, then_code, else_code)
                 } else {
                     let cond_code = self.visit_expression(condition);
-                    let old_out = std::mem::take(&mut self.output);
+                    let old_out = take(&mut self.output);
                     let old_indent = self.indent_level;
                     self.indent_level += 2;
 
@@ -820,12 +862,12 @@ impl CodeGenerator {
                                 let fc = self.visit_expression(f);
                                 self.emit(&format!("return {};", fc));
                             }
-                            std::mem::take(&mut self.output)
+                            take(&mut self.output)
                         }
                         _ => {
                             let tc = self.visit_expression(then_branch);
                             self.emit(&format!("return {};", tc));
-                            std::mem::take(&mut self.output)
+                            take(&mut self.output)
                         }
                     };
 
@@ -841,12 +883,12 @@ impl CodeGenerator {
                                 let fc = self.visit_expression(f);
                                 self.emit(&format!("return {};", fc));
                             }
-                            std::mem::take(&mut self.output)
+                            take(&mut self.output)
                         }
                         _ => {
                             let ec = self.visit_expression(else_branch);
                             self.emit(&format!("return {};", ec));
-                            std::mem::take(&mut self.output)
+                            take(&mut self.output)
                         }
                     };
 
@@ -872,7 +914,7 @@ impl CodeGenerator {
                 statements,
                 final_expr,
             } => {
-                let old_out = std::mem::take(&mut self.output);
+                let old_out = take(&mut self.output);
                 let old_indent = self.indent_level;
                 self.indent_level += 1;
 
@@ -884,7 +926,7 @@ impl CodeGenerator {
                     self.emit(&format!("return {};", fc));
                 }
 
-                let body_code = std::mem::take(&mut self.output);
+                let body_code = take(&mut self.output);
                 self.indent_level = old_indent;
                 self.output = old_out;
 
@@ -900,7 +942,7 @@ impl CodeGenerator {
                 )
             }
             Expr::ForeignBlock { kind, chunks } => {
-                let old_out = std::mem::take(&mut self.output);
+                let old_out = take(&mut self.output);
                 let old_indent = self.indent_level;
                 self.indent_level += 1;
 
@@ -925,7 +967,8 @@ impl CodeGenerator {
                                 .replace('\t', "\\t");
                             self.emit(&format!("__append(\"{}\");", escaped));
                             let trimmed = processed_s.trim_end();
-                            prev_ended_with_equal = matches!(kind, ForeignKind::Html) && trimmed.ends_with('=');
+                            prev_ended_with_equal =
+                                matches!(kind, ForeignKind::Html) && trimmed.ends_with('=');
                         }
                         ForeignChunk::Interpolation(expr) => {
                             let expr_code = self.visit_expression(expr);
@@ -965,7 +1008,7 @@ impl CodeGenerator {
                     }
                 }
 
-                let body_code = std::mem::take(&mut self.output);
+                let body_code = take(&mut self.output);
                 self.indent_level = old_indent;
                 self.output = old_out;
 
@@ -1058,13 +1101,16 @@ impl CodeGenerator {
             Expr::LiteralBool(_) => Some("bool".to_string()),
             Expr::LiteralInt(_) => Some("int32_t".to_string()),
             Expr::LiteralFloat(_) => Some("double".to_string()),
-            Expr::IfExpr { then_branch, else_branch, .. } => {
-                self.extract_cpp_type_from_expr(then_branch)
-                    .or_else(|| self.extract_cpp_type_from_expr(else_branch))
-            }
-            Expr::BlockExpr { final_expr, .. } => {
-                final_expr.as_ref().and_then(|f| self.extract_cpp_type_from_expr(f))
-            }
+            Expr::IfExpr {
+                then_branch,
+                else_branch,
+                ..
+            } => self
+                .extract_cpp_type_from_expr(then_branch)
+                .or_else(|| self.extract_cpp_type_from_expr(else_branch)),
+            Expr::BlockExpr { final_expr, .. } => final_expr
+                .as_ref()
+                .and_then(|f| self.extract_cpp_type_from_expr(f)),
             Expr::Cast { target_type, .. } => Some(type_to_cpp(target_type)),
             Expr::BinaryOp {
                 left,
@@ -1121,11 +1167,23 @@ pub(crate) fn transform_fastreact_html(input: &str) -> String {
             format!("\t{}='/", attr),
         ] {
             let repl = if prefix.starts_with('\n') {
-                if prefix.ends_with('\'') { "\nhx-post='/" } else { "\nhx-post=\"/" }
+                if prefix.ends_with('\'') {
+                    "\nhx-post='/"
+                } else {
+                    "\nhx-post=\"/"
+                }
             } else if prefix.starts_with('\t') {
-                if prefix.ends_with('\'') { "\thx-post='/" } else { "\thx-post=\"/" }
+                if prefix.ends_with('\'') {
+                    "\thx-post='/"
+                } else {
+                    "\thx-post=\"/"
+                }
             } else {
-                if prefix.ends_with('\'') { " hx-post='/" } else { " hx-post=\"/" }
+                if prefix.ends_with('\'') {
+                    " hx-post='/"
+                } else {
+                    " hx-post=\"/"
+                }
             };
             out = out.replace(prefix.as_str(), repl);
         }
@@ -1136,7 +1194,14 @@ pub(crate) fn transform_fastreact_html(input: &str) -> String {
     }
 
     // 2. target="..." (exclude _blank, _self, _top, _parent)
-    for prefix in &[" target=\"", "\ntarget=\"", "\ttarget=\"", " target='", "\ntarget='", "\ttarget='"] {
+    for prefix in &[
+        " target=\"",
+        "\ntarget=\"",
+        "\ttarget=\"",
+        " target='",
+        "\ntarget='",
+        "\ttarget='",
+    ] {
         let mut start_idx = 0;
         while let Some(pos) = out[start_idx..].find(prefix) {
             let actual_pos = start_idx + pos;
@@ -1147,11 +1212,23 @@ pub(crate) fn transform_fastreact_html(input: &str) -> String {
                 && !out[after_prefix..].starts_with("_parent")
             {
                 let repl = if prefix.starts_with('\n') {
-                    if prefix.ends_with('\'') { "\nhx-target='" } else { "\nhx-target=\"" }
+                    if prefix.ends_with('\'') {
+                        "\nhx-target='"
+                    } else {
+                        "\nhx-target=\""
+                    }
                 } else if prefix.starts_with('\t') {
-                    if prefix.ends_with('\'') { "\thx-target='" } else { "\thx-target=\"" }
+                    if prefix.ends_with('\'') {
+                        "\thx-target='"
+                    } else {
+                        "\thx-target=\""
+                    }
                 } else {
-                    if prefix.ends_with('\'') { " hx-target='" } else { " hx-target=\"" }
+                    if prefix.ends_with('\'') {
+                        " hx-target='"
+                    } else {
+                        " hx-target=\""
+                    }
                 };
                 out.replace_range(actual_pos..actual_pos + prefix.len(), repl);
                 start_idx = actual_pos + repl.len();

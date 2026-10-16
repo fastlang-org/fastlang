@@ -1,3 +1,4 @@
+use core::mem::discriminant;
 use std::collections::HashMap;
 
 use crate::frontend::lexer::token::{Token, TokenKind};
@@ -25,10 +26,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new_with_aliases(
-        tokens: Vec<Token>,
-        type_aliases: HashMap<String, BaseType>,
-    ) -> Self {
+    pub fn new_with_aliases(tokens: Vec<Token>, type_aliases: HashMap<String, BaseType>) -> Self {
         let mut macro_metadata = std::collections::HashSet::new();
         for i in 0..tokens.len() {
             if tokens[i].kind == TokenKind::TypeMacro {
@@ -129,7 +127,7 @@ impl Parser {
         expected: TokenKind,
         error_message: &str,
     ) -> Result<&Token, String> {
-        if core::mem::discriminant(&self.peek().kind) == core::mem::discriminant(&expected) {
+        if discriminant(&self.peek().kind) == discriminant(&expected) {
             Ok(self.advance())
         } else {
             // Future location for line-based diagnostics and hints

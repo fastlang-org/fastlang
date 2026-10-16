@@ -3,6 +3,7 @@ use crate::backend::cpp::stmt::{cpp_safe_name, is_raw_pointer, type_to_cpp};
 use crate::frontend::parser::ast::*;
 use crate::middle_end::semantic::analyzer::detect_execution_mode;
 use std::collections::{HashMap, HashSet};
+use std::mem::{replace, take};
 pub struct CodeGenerator {
     pub(crate) output: String,
     pub(crate) indent_level: usize,
@@ -130,8 +131,7 @@ impl CodeGenerator {
 
                     if let Some(o) = op {
                         if params.len() == 1 {
-                            let param_type =
-                                type_to_cpp(&params[0].type_node);
+                            let param_type = type_to_cpp(&params[0].type_node);
                             let param_name = &params[0].name;
                             let (op_ret, is_void) = if ret_str == "void" {
                                 (
@@ -160,8 +160,7 @@ impl CodeGenerator {
                         }
                     } else if name == "index_access" {
                         if params.len() == 1 {
-                            let param_type =
-                                type_to_cpp(&params[0].type_node);
+                            let param_type = type_to_cpp(&params[0].type_node);
                             let param_name = &params[0].name;
                             self.emit(&format!(
                                 "{} operator[]({} {}) {{",
@@ -185,8 +184,7 @@ impl CodeGenerator {
                             let param_list: Vec<String> = params
                                 .iter()
                                 .map(|p| {
-                                    let p_type =
-                                        type_to_cpp(&p.type_node);
+                                    let p_type = type_to_cpp(&p.type_node);
                                     format!("{} {}", p_type, p.name)
                                 })
                                 .collect();
@@ -331,34 +329,13 @@ impl CodeGenerator {
                 }))
     }
 
-    pub(crate) fn fork_child(&self) -> CodeGenerator {
-        let mut child = CodeGenerator::new();
-        child.indent_level = self.indent_level;
-        child.machine_types = self.machine_types.clone();
-        child.enum_types = self.enum_types.clone();
-        child.used_enums = self.used_enums.clone();
-        child.payload_enum_types = self.payload_enum_types.clone();
-        child.simple_enum_types = self.simple_enum_types.clone();
-        child.pointer_vars = self.pointer_vars.clone();
-        child.raw_pointer_vars = self.raw_pointer_vars.clone();
-        child.address_vars = self.address_vars.clone();
-        child.vars = self.vars.clone();
-        child.type_aliases = self.type_aliases.clone();
-        child.function_handles = self.function_handles.clone();
-        child.target_impl_methods = self.target_impl_methods.clone();
-        child.target_handle_methods = self.target_handle_methods.clone();
-        child.struct_field_types = self.struct_field_types.clone();
-        child.struct_field_counts = self.struct_field_counts.clone();
-        child.primitive_impl_methods = self.primitive_impl_methods.clone();
-        child.property_access_types = self.property_access_types.clone();
-        child.type_own_members = self.type_own_members.clone();
-        child.types_with_drop = self.types_with_drop.clone();
-        child.namespaces = self.namespaces.clone();
-        child.forward_declared_fns = self.forward_declared_fns.clone();
-        child.current_class_name = self.current_class_name.clone();
-        child.current_fn_name = self.current_fn_name.clone();
-        child.fn_return_types = self.fn_return_types.clone();
-        child
+    pub(crate) fn capture_output<F>(&mut self, f: F) -> String
+    where
+        F: FnOnce(&mut Self),
+    {
+        let prev_output = take(&mut self.output);
+        f(self);
+        replace(&mut self.output, prev_output)
     }
 
     pub fn scan_declarations(&mut self, flat_ast: &[Stmt]) {
@@ -378,10 +355,7 @@ impl CodeGenerator {
                     self.struct_field_counts.insert(name.clone(), fields.len());
                     let mut fields_map = HashMap::new();
                     for f in fields {
-                        fields_map.insert(
-                            f.name.clone(),
-                            type_to_cpp(&f.type_node),
-                        );
+                        fields_map.insert(f.name.clone(), type_to_cpp(&f.type_node));
                         self.type_own_members
                             .entry(clean_name.clone())
                             .or_insert_with(HashSet::new)
@@ -423,10 +397,7 @@ impl CodeGenerator {
                         ..
                     } = d
                     {
-                        fields_map.insert(
-                            f_name.clone(),
-                            type_to_cpp(type_node),
-                        );
+                        fields_map.insert(f_name.clone(), type_to_cpp(type_node));
                     }
                 }
                 let clean_name = if let Some(idx) = name.find('<') {
@@ -463,10 +434,7 @@ impl CodeGenerator {
                         ..
                     } = d
                     {
-                        fields_map.insert(
-                            f_name.clone(),
-                            type_to_cpp(type_node),
-                        );
+                        fields_map.insert(f_name.clone(), type_to_cpp(type_node));
                     }
                 }
                 let clean_name = if let Some(idx) = name.find('<') {
@@ -623,7 +591,10 @@ impl CodeGenerator {
             {
                 let cpp_t = type_to_cpp(t);
                 self.type_aliases.insert(name.clone(), cpp_t);
-            } else if let Stmt::Declaration(Decl::FnDecl { name, return_type, .. }) = stmt {
+            } else if let Stmt::Declaration(Decl::FnDecl {
+                name, return_type, ..
+            }) = stmt
+            {
                 let cpp_t = type_to_cpp(return_type);
                 self.fn_return_types.insert(name.clone(), cpp_t);
             }
@@ -670,11 +641,7 @@ impl CodeGenerator {
         // Pre-pass for Blueprints and Impls
         let mut blueprints: HashMap<
             String,
-            (
-                Vec<BaseType>,
-                BlueprintDef,
-                Option<BlueprintShareDirective>,
-            ),
+            (Vec<BaseType>, BlueprintDef, Option<BlueprintShareDirective>),
         > = HashMap::new();
         let mut impls: HashMap<String, Vec<Decl>> = HashMap::new();
         let mut blueprint_handles: HashMap<String, Vec<Decl>> = HashMap::new();
@@ -861,8 +828,7 @@ impl CodeGenerator {
 
                     for field in &fields {
                         let cpp_f_type = type_to_cpp(&field.type_node);
-                        if is_raw_pointer(&field.type_node, &cpp_f_type)
-                        {
+                        if is_raw_pointer(&field.type_node, &cpp_f_type) {
                             self.raw_pointer_vars.insert(field.name.clone());
                             self.raw_pointer_vars
                                 .insert(format!("this->{}", field.name));
@@ -883,8 +849,7 @@ impl CodeGenerator {
                                     field.name
                                 ));
                             } else {
-                                let type_str =
-                                    type_to_cpp(&field.type_node);
+                                let type_str = type_to_cpp(&field.type_node);
                                 if let Some(ref def_val) = field.default_value {
                                     let def_code = self.visit_expression(def_val);
                                     self.emit(&format!(
@@ -1106,9 +1071,7 @@ impl CodeGenerator {
                                 let ret_str = type_to_cpp(return_type);
                                 if let Some(o) = op {
                                     if params.len() == 1 {
-                                        let param_type = type_to_cpp(
-                                            &params[0].type_node,
-                                        );
+                                        let param_type = type_to_cpp(&params[0].type_node);
                                         let param_name = &params[0].name;
                                         let (op_ret, is_void) = if ret_str == "void" {
                                             (format!("{}&", name), true)
@@ -1137,9 +1100,7 @@ impl CodeGenerator {
                                     }
                                 } else if fn_name == "index_access" {
                                     if params.len() == 1 {
-                                        let param_type = type_to_cpp(
-                                            &params[0].type_node,
-                                        );
+                                        let param_type = type_to_cpp(&params[0].type_node);
                                         let param_name = &params[0].name;
                                         self.emit(&format!(
                                             "{} operator[]({} {}) {{",
@@ -1159,9 +1120,7 @@ impl CodeGenerator {
                                     let param_sigs: Vec<String> = params
                                         .iter()
                                         .map(|p| {
-                                            let pt = type_to_cpp(
-                                                &p.type_node,
-                                            );
+                                            let pt = type_to_cpp(&p.type_node);
                                             format!("{} {}", pt, p.name)
                                         })
                                         .collect();
@@ -1257,8 +1216,7 @@ impl CodeGenerator {
                     && !name.starts_with("@compile::")
                     && !*is_abstract
                     && !body.is_empty()
-                    && detect_execution_mode(body)
-                        != ExecutionMode::FullyCompilable
+                    && detect_execution_mode(body) != ExecutionMode::FullyCompilable
                 {
                     let has_variadic_param = params.iter().any(|p| p.is_variadic);
                     let mut gen_names: Vec<String> = generics
@@ -1418,11 +1376,7 @@ impl CodeGenerator {
                             extra_gen_params.push(format!("typename {}", func_t));
                             param_cpps.push(format!("{} {}", func_t, p.name));
                         } else {
-                            param_cpps.push(format!(
-                                "{} {}",
-                                type_to_cpp(&p.type_node),
-                                p.name
-                            ));
+                            param_cpps.push(format!("{} {}", type_to_cpp(&p.type_node), p.name));
                         }
                     }
 
