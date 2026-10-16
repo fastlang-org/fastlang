@@ -1,5 +1,4 @@
 use crate::frontend::parser::ast::*;
-use crate::middle_end::interpreter::fast_type::FastType;
 use crate::middle_end::interpreter::Interpreter;
 use crate::middle_end::interpreter::eval::{
     is_known_type_name, is_typeof_callee, strip_type_wrapper, substitute_this_in_expr,
@@ -14,7 +13,7 @@ impl Interpreter {
 
     pub fn fastlang_sizeof(&mut self, expr: &Expr) -> u32 {
         let t = self.get_expr_type(expr);
-        FastType::from_name(&t).size()
+        BaseType::from_str(&t).size()
     }
 
     pub fn fastlang_throw(&mut self, msg: &str) -> Result<Expr, String> {
@@ -38,8 +37,8 @@ impl Interpreter {
                 format!("[{}]", inner.join(", "))
             }
             Expr::Identifier(id) => {
-                if let Ok(val) = self.env.get(id) {
-                    self.format_expr_for_print(&val)
+                if let Some(val) = self.env.get_ref(id) {
+                    self.format_expr_for_print(val)
                 } else {
                     id.clone()
                 }
@@ -58,8 +57,8 @@ impl Interpreter {
                 Ok(-inner)
             }
             Expr::Identifier(id) => {
-                if let Ok(v) = self.env.get(id) {
-                    self.expr_to_i128(&v)
+                if let Some(v) = self.env.get_ref(id) {
+                    self.expr_to_i128(v)
                 } else {
                     Err(format!(
                         "Identifier '{}' is not a constant integer in rand()",
@@ -81,8 +80,8 @@ impl Interpreter {
                 Ok(-inner)
             }
             Expr::Identifier(id) => {
-                if let Ok(v) = self.env.get(id) {
-                    self.expr_to_f64(&v)
+                if let Some(v) = self.env.get_ref(id) {
+                    self.expr_to_f64(v)
                 } else {
                     Err(format!(
                         "Identifier '{}' is not a constant float in rand()",

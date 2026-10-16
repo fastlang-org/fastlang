@@ -26,12 +26,12 @@ impl Interpreter {
                     BaseType::New(n) => n.clone(),
                     _ => target_type.as_str(),
                 };
-                let resolved_target = if let Ok(Expr::LiteralString(s)) = self.env.get(&target_name)
+                let resolved_target = if let Some(Expr::LiteralString(s)) = self.env.get_ref(&target_name)
                 {
                     let clean = if s.starts_with("type<") && s.ends_with('>') {
                         &s[5..s.len() - 1]
                     } else {
-                        &s
+                        s.as_str()
                     };
                     BaseType::from_str(clean)
                 } else {
@@ -86,8 +86,8 @@ impl Interpreter {
                 let type_name = match &obj_val {
                     Expr::LiteralString(s) => strip_type_wrapper(s).to_string(),
                     Expr::Identifier(id) => {
-                        if let Ok(Expr::LiteralString(s)) = self.env.get(id) {
-                            strip_type_wrapper(&s).to_string()
+                        if let Some(Expr::LiteralString(s)) = self.env.get_ref(id) {
+                            strip_type_wrapper(s).to_string()
                         } else {
                             id.clone()
                         }

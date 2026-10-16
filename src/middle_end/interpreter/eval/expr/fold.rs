@@ -3,7 +3,6 @@ use crate::middle_end::interpreter::env::InterpreterEnv;
 use crate::middle_end::interpreter::eval::is_literal;
 use crate::middle_end::interpreter::eval::substitute::substitute_expr;
 use crate::middle_end::interpreter::eval::strip_type_wrapper;
-use crate::middle_end::interpreter::fast_type::FastType;
 use crate::middle_end::interpreter::intrinsics::CompilerIntrinsics;
 use crate::middle_end::interpreter::Interpreter;
 use crate::middle_end::semantic::analyzer::resolve_call_generics;
@@ -623,7 +622,7 @@ impl Interpreter {
                     if let Some(arg) = args.first() {
                         let t = self.get_expr_type(arg);
                         if t != "unknown" {
-                            let sz = FastType::from_name(&t).size();
+                            let sz = BaseType::from_str(&t).size();
                             *expr = Expr::LiteralInt(sz as i128);
                             return Ok(());
                         }
@@ -657,7 +656,7 @@ impl Interpreter {
                         let target_str = target_type.as_str();
                         let is_generic =
                             matches!(target_type, BaseType::GenericParam(_) | BaseType::Unknown)
-                                || (!FastType::from_name(&target_str).is_primitive()
+                                || (!BaseType::from_str(&target_str).is_primitive()
                                     && self.env.get(&target_str).is_err());
                         if !is_generic && is_literal(&resolved) {
                             if let Ok(res) = self.fastlang_cast(&resolved, target_type) {

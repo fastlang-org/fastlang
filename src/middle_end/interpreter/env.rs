@@ -48,11 +48,23 @@ impl InterpreterEnv {
         }
     }
 
-    pub fn get(&self, name: &str) -> Result<Expr, String> {
+    pub fn get_ref(&self, name: &str) -> Option<&Expr> {
         if let Some(val) = self.variables.get(name) {
-            Ok(val.clone())
+            Some(val)
         } else if let Some(ref parent) = self.parent {
-            parent.get(name)
+            parent.get_ref(name)
+        } else {
+            None
+        }
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.variables.contains_key(name) || self.parent.as_ref().map_or(false, |p| p.contains(name))
+    }
+
+    pub fn get(&self, name: &str) -> Result<Expr, String> {
+        if let Some(val) = self.get_ref(name) {
+            Ok(val.clone())
         } else {
             Err(format!("Undefined variable '{}' at compile time.", name))
         }

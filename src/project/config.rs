@@ -2,10 +2,44 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+use crate::project::registry::KnownDependency;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     #[serde(default)]
     pub library_paths: Vec<String>,
+    #[serde(default = "default_backend")]
+    pub default_backend: String,
+    #[serde(default = "default_compiler")]
+    pub cxx_compiler: String,
+    #[serde(default)]
+    pub std_path: Option<String>,
+    #[serde(default)]
+    pub packages_dir: Option<String>,
+    #[serde(default)]
+    pub dependencies: HashMap<String, KnownDependency>,
+}
+
+fn default_backend() -> String {
+    "cpp".to_string()
+}
+
+fn default_compiler() -> String {
+    "g++".to_string()
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            library_paths: Vec::new(),
+            default_backend: default_backend(),
+            cxx_compiler: default_compiler(),
+            std_path: None,
+            packages_dir: None,
+            dependencies: HashMap::new(),
+        }
+    }
 }
 
 impl GlobalConfig {

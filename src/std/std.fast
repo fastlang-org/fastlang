@@ -52,6 +52,11 @@ public @compile :: {
         set on_heap() -> bool;
         set on_stack() -> bool;
     }
+    /*
+    impl type<function> {
+    set has_leave() -> bool;
+    }
+    */
     micro todo = (msg: str) -> {
         throw new Error("TODO: " + msg);
     }

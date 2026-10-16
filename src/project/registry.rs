@@ -22,34 +22,16 @@ pub struct DependencyRegistry {
 
 impl DependencyRegistry {
     pub fn config_path() -> PathBuf {
-        if let Ok(custom) = std::env::var("FAST_REGISTRY_PATH") {
+        if let Ok(custom) = std::env::var("FAST_CONFIG_PATH") {
             return PathBuf::from(custom);
         }
         let base_dir = dirs_fallback();
         let fast_dir = base_dir.join(".fast");
-        fast_dir.join("known_dependencies.toml")
-    }
-
-    pub fn built_in_dependencies() -> HashMap<String, KnownDependency> {
-        let mut map = HashMap::new();
-        map.insert(
-            "sqlite3".to_string(),
-            KnownDependency {
-                name: "sqlite3".to_string(),
-                version: Some("3.36.0".to_string()),
-                url: "https://www.sqlite.org/2021/sqlite-amalgamation-3360000.zip".to_string(),
-                description: Some("SQLite Embedded Database Engine C Amalgamation".to_string()),
-            },
-        );
-        map
+        fast_dir.join("config.toml")
     }
 
     pub fn load() -> Self {
         let mut reg = Self::default();
-        // 1. Seed with built-in dependencies
-        reg.dependencies = Self::built_in_dependencies();
-
-        // 2. Overlay user configured dependencies
         let path = Self::config_path();
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {

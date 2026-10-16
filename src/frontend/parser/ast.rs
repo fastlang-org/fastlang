@@ -182,6 +182,51 @@ impl BaseType {
         matches!(self, BaseType::Str | BaseType::UStr)
     }
 
+    pub fn is_pointer(&self) -> bool {
+        matches!(self, BaseType::RawPointer(_) | BaseType::Address(_))
+            || self.as_str().starts_with('&')
+            || self.as_str().ends_with('*')
+            || self.as_str().ends_with('&')
+    }
+
+    pub fn on_heap(&self) -> bool {
+        self.is_pointer() || self.is_array()
+    }
+
+    pub fn on_stack(&self) -> bool {
+        !self.on_heap()
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(self, BaseType::Array { .. })
+            || self.as_str().starts_with("array<")
+            || self.as_str().ends_with("[]")
+    }
+
+    pub fn size(&self) -> u32 {
+        match self {
+            BaseType::Int(sz) | BaseType::UInt(sz) => match sz {
+                Size::S8 => 1,
+                Size::S16 => 2,
+                Size::S32 => 4,
+                Size::S64 => 8,
+                Size::S128 => 16,
+            },
+            BaseType::USize | BaseType::ISize => 8,
+            BaseType::Float(sz) => match sz {
+                Size::S8 | Size::S16 | Size::S32 => 4,
+                Size::S64 | Size::S128 => 8,
+            },
+            BaseType::Bool => 1,
+            BaseType::Char => 1,
+            BaseType::UChar => 4,
+            BaseType::Str | BaseType::UStr => 8,
+            BaseType::Void => 0,
+            _ if self.is_pointer() => 8,
+            _ => 8,
+        }
+    }
+
     pub fn is_callable(&self) -> bool {
         matches!(
             self,
@@ -673,12 +718,36 @@ impl BaseType {
             | BaseType::Type(base_type) => {
                 base_type.collect_type_dependencies(out);
             }
-            BaseType::Fn { params, return_type, .. }
-            | BaseType::Method { params, return_type, .. }
-            | BaseType::Micro { params, return_type, .. }
-            | BaseType::Macro { params, return_type, .. }
-            | BaseType::Lambda { params, return_type, .. }
-            | BaseType::Function { params, return_type, .. } => {
+            BaseType::Fn {
+                params,
+                return_type,
+                ..
+            }
+            | BaseType::Method {
+                params,
+                return_type,
+                ..
+            }
+            | BaseType::Micro {
+                params,
+                return_type,
+                ..
+            }
+            | BaseType::Macro {
+                params,
+                return_type,
+                ..
+            }
+            | BaseType::Lambda {
+                params,
+                return_type,
+                ..
+            }
+            | BaseType::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 for p in params {
                     p.collect_type_dependencies(out);
                 }
@@ -957,6 +1026,9 @@ pub enum Flag {
     Printable,
     Throwable,
     Shareable,
+    Copyable,
+    Castable,
+    Defaultable,
 
     // Scope capabilities
     HasReturn,
@@ -988,6 +1060,9 @@ impl Flag {
             "printable" | "is_printable" => Flag::Printable,
             "throwable" | "is_throwable" => Flag::Throwable,
             "shareable" | "is_shareable" => Flag::Shareable,
+            "copyable" | "is_copyable" => Flag::Copyable,
+            "castable" | "is_castable" => Flag::Castable,
+            "defaultable" | "is_defaultable" => Flag::Defaultable,
             "has_return" => Flag::HasReturn,
             "has_yield" => Flag::HasYield,
             "has_break" => Flag::HasBreak,
@@ -1014,6 +1089,9 @@ impl Flag {
             Flag::Printable => "printable".to_string(),
             Flag::Throwable => "throwable".to_string(),
             Flag::Shareable => "shareable".to_string(),
+            Flag::Copyable => "copyable".to_string(),
+            Flag::Castable => "castable".to_string(),
+            Flag::Defaultable => "defaultable".to_string(),
             Flag::HasReturn => "has_return".to_string(),
             Flag::HasYield => "has_yield".to_string(),
             Flag::HasBreak => "has_break".to_string(),
@@ -1524,8 +1602,17 @@ impl Expr {
             Expr::Cast { expr, target_type } => {
                 format!("({} as {})", expr.as_str(), target_type.as_str())
             }
-            Expr::IfExpr { condition, then_branch, else_branch } => {
-                format!("if ({}) {} else {}", condition.as_str(), then_branch.as_str(), else_branch.as_str())
+            Expr::IfExpr {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                format!(
+                    "if ({}) {} else {}",
+                    condition.as_str(),
+                    then_branch.as_str(),
+                    else_branch.as_str()
+                )
             }
             Expr::BlockExpr { final_expr, .. } => {
                 let f = final_expr.as_ref().map(|e| e.as_str()).unwrap_or_default();
