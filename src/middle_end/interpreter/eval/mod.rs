@@ -13,9 +13,6 @@ pub use substitute::*;
 
 use crate::frontend::parser::ast::*;
 use crate::middle_end::interpreter::env::InterpreterEnv;
-use crate::middle_end::interpreter::fast_type::FastType;
-use crate::middle_end::interpreter::intrinsics::CompilerIntrinsics;
-use crate::middle_end::semantic::analyzer::resolve_call_generics;
 use crate::middle_end::semantic::environment::{Environment, FnSignature, SymbolKind};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -203,7 +200,7 @@ pub fn has_compile_operations(stmts: &[Stmt]) -> bool {
     stmts.iter().any(check_stmt)
 }
 
-fn substitute_this_in_expr(expr: &Expr, replacement: &Expr) -> Expr {
+pub(crate) fn substitute_this_in_expr(expr: &Expr, replacement: &Expr) -> Expr {
     match expr {
         Expr::This => replacement.clone(),
         Expr::PropertyAccess { object, property } => Expr::PropertyAccess {
@@ -227,7 +224,7 @@ fn substitute_this_in_expr(expr: &Expr, replacement: &Expr) -> Expr {
     }
 }
 
-fn expr_contains_this(expr: &Expr) -> bool {
+pub(crate) fn expr_contains_this(expr: &Expr) -> bool {
     match expr {
         Expr::This => true,
         Expr::PropertyAccess { object, .. } => expr_contains_this(object),
