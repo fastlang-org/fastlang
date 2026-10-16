@@ -577,7 +577,7 @@ impl CodeGenerator {
                 self.pointer_vars = prev_pointers;
                 self.address_vars = prev_address_vars;
             }
-            Decl::LabelDecl { name, body } => {
+            Decl::LabelDecl { name, body, .. } => {
                 self.emit(&format!("void {}() {{", name));
                 self.indent_level += 1;
                 for s in body {

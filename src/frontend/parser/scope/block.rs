@@ -37,8 +37,29 @@ impl Parser {
             return Err(format!("Expected '{{' or ';' after label '{}'", label_name));
         }
 
+        // Mandatory execution bound brackets: [N]; or [];
+        self.consume(
+            TokenKind::LBracket,
+            &format!(
+                "Syntax Error: Label '{}' at line {} must be followed by mandatory execution bound brackets '[N];' or '[];'",
+                label_name, self.peek().line
+            ),
+        )?;
+        let max_runs = if self.peek().kind == TokenKind::RBracket {
+            self.advance(); // consume ']' -> empty means infinite/unbounded
+            None
+        } else {
+            let expr = self.parse_expression()?;
+            self.consume(TokenKind::RBracket, "Expected ']' after label run limit expression")?;
+            Some(Box::new(expr))
+        };
+        if self.peek().kind == TokenKind::SemiColon {
+            self.advance(); // consume optional ';'
+        }
+
         Ok(Decl::LabelDecl {
             name: label_name,
+            max_runs,
             body,
         })
     }

@@ -1049,6 +1049,7 @@ pub enum Flag {
     Continued,
     Returned,
     Leaved,
+    RunOnce,
 
     Custom(String),
 }
@@ -1079,6 +1080,7 @@ impl Flag {
             "continued" => Flag::Continued,
             "returned" => Flag::Returned,
             "leaved" => Flag::Leaved,
+            "run_once" | "runonce" => Flag::RunOnce,
             _ => Flag::Custom(s.to_string()),
         }
     }
@@ -1108,6 +1110,7 @@ impl Flag {
             Flag::Continued => "continued".to_string(),
             Flag::Returned => "returned".to_string(),
             Flag::Leaved => "leaved".to_string(),
+            Flag::RunOnce => "run_once".to_string(),
             Flag::Custom(s) => s.clone(),
         }
     }
@@ -1784,6 +1787,7 @@ pub enum Decl {
     },
     LabelDecl {
         name: String,
+        max_runs: Option<Box<Expr>>,
         body: Vec<Stmt>,
     },
     Import {

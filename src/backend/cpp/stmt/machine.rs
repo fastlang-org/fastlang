@@ -140,10 +140,59 @@ impl CodeGenerator {
                         }
                     }
                 }
+                fn collect_label_this_fields(
+                    s: &Stmt,
+                    field_names: &mut Vec<String>,
+                    fields_out: &mut Vec<String>,
+                ) {
+                    match s {
+                        Stmt::ThisBlock(inner) => {
+                            for sub in inner {
+                                if let Stmt::Declaration(Decl::VarDecl { name, type_node, .. }) = sub {
+                                    if !field_names.contains(name) {
+                                        let cpp_t = type_to_cpp(type_node);
+                                        fields_out.push(format!("{} {} = {{}};", cpp_t, name));
+                                        field_names.push(name.clone());
+                                    }
+                                }
+                            }
+                        }
+                        Stmt::ReassignStmt { target, .. } => {
+                            if let Expr::PropertyAccess { object, property } = target {
+                                if matches!(&**object, Expr::This) && !field_names.contains(property) {
+                                    fields_out.push(format!("int32_t {} = {{}};", property));
+                                    field_names.push(property.clone());
+                                }
+                            }
+                        }
+                        Stmt::Block(inner) => {
+                            for sub in inner {
+                                collect_label_this_fields(sub, field_names, fields_out);
+                            }
+                        }
+                        Stmt::IfStmt { then_block, else_block, .. } => {
+                            for sub in then_block {
+                                collect_label_this_fields(sub, field_names, fields_out);
+                            }
+                            if let Some(eb) = else_block {
+                                for sub in eb {
+                                    collect_label_this_fields(sub, field_names, fields_out);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 for label_decl in labels.iter() {
-                    if let Decl::LabelDecl { body, .. } = label_decl {
+                    if let Decl::LabelDecl { body, name: lbl_name, max_runs } = label_decl {
+                        let clean = lbl_name.replace("@", "");
+                        if max_runs.is_some() {
+                            fields_out.push(format!("size_t __run_count_{} = 0;", clean));
+                        }
                         for s in body {
                             collect_machine_fields(s, &mut field_names, &mut fields_out);
+                            collect_label_this_fields(s, &mut field_names, &mut fields_out);
                         }
                     }
                 }
@@ -200,12 +249,20 @@ impl CodeGenerator {
                     let lbl_decl = &labels[i];
                     if let Decl::LabelDecl {
                         name: lbl_name,
+                        max_runs,
                         body,
                     } = lbl_decl
                     {
                         let clean = lbl_name.replace("@", "");
                         self.emit(&format!("{}: {{", clean));
                         self.indent_level += 1;
+                        if let Some(ref expr) = max_runs {
+                            let limit_code = self.visit_expression(expr);
+                            self.emit(&format!(
+                                "if (++this->__run_count_{} > {}) {{ throw fast_std::Error((std::string(\"Runtime Error: machine '{}' label '{}' exceeded execution limit of \") + std::to_string({})).c_str()); }}",
+                                clean, limit_code, name, lbl_name, limit_code
+                            ));
+                        }
                         for s in body {
                             match s {
                                 Stmt::Declaration(Decl::VarDecl {
@@ -214,8 +271,12 @@ impl CodeGenerator {
                                     assign_op: _,
                                     ..
                                 }) => {
-                                    let val_code = self.visit_expression(value);
-                                    self.emit(&format!("this->{} = {};", f_name, val_code));
+                                    if field_names.contains(f_name) {
+                                        let val_code = self.visit_expression(value);
+                                        self.emit(&format!("this->{} = {};", f_name, val_code));
+                                    } else {
+                                        self.visit_statement(s);
+                                    }
                                 }
                                 Stmt::ContinueStmt => {
                                     if i + 1 < labels.len() {

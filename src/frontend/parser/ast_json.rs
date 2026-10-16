@@ -257,10 +257,11 @@ pub fn decl_to_json(decl: &Decl) -> Value {
             "return_type": return_type.as_ref().map(|t| t.as_str()),
             "body": stmts_to_json(body)
         }),
-        Decl::LabelDecl { name, body } =>
+        Decl::LabelDecl { name, max_runs, body } =>
             json!({
             "type": "LabelDecl",
             "name": name,
+            "max_runs": max_runs.as_ref().map(|r| format!("{:?}", r)),
             "body": stmts_to_json(body)
         }),
         Decl::Import { module_path, imports, abi, alias } =>

@@ -34,7 +34,7 @@ pub(crate) fn type_to_cpp(t: &BaseType) -> String {
             if !name.is_empty() {
                 format!("__machine_type_{}", name)
             } else {
-                "std::function<void()>".to_string()
+                "fastlang_fn_ptr<void>".to_string()
             }
         }
         BaseType::Class { name, generics, .. } | BaseType::Struct { name, generics, .. } => {
@@ -96,7 +96,11 @@ pub(crate) fn type_to_cpp(t: &BaseType) -> String {
             } else {
                 let ret = type_to_cpp(return_type);
                 let p_types: Vec<String> = params.iter().map(type_to_cpp).collect();
-                format!("std::function<{}({})>", ret, p_types.join(", "))
+                if p_types.is_empty() {
+                    format!("fastlang_fn_ptr<{}>", ret)
+                } else {
+                    format!("fastlang_fn_ptr<{}, {}>", ret, p_types.join(", "))
+                }
             }
         }
         BaseType::Function {
@@ -109,7 +113,11 @@ pub(crate) fn type_to_cpp(t: &BaseType) -> String {
             } else {
                 let ret = type_to_cpp(return_type);
                 let p_types: Vec<String> = params.iter().map(type_to_cpp).collect();
-                format!("std::function<{}({})>", ret, p_types.join(", "))
+                if p_types.is_empty() {
+                    format!("fastlang_fn_ptr<{}>", ret)
+                } else {
+                    format!("fastlang_fn_ptr<{}, {}>", ret, p_types.join(", "))
+                }
             }
         }
         BaseType::Object => "auto&&".to_string(),

@@ -6,7 +6,7 @@ machine CounterMachine -> {
         int32 count = 0;
         int32 max_limit = 5;
         goto -> @step;
-    }
+    } [1];
 
     @step -> {
         count = count + 1;
@@ -14,11 +14,11 @@ machine CounterMachine -> {
             goto -> @finish;
         }
         goto -> @step;
-    }
+    } [];
 
     @finish -> {
         leave;
-    }
+    } [1];
 
     handle -> {
         fn call() -> int32 {
@@ -30,10 +30,73 @@ machine CounterMachine -> {
     }
 }
 
+// State Machine with vertical sequential continue and implicit leave (from legacy test 86)
+machine StepperMachine -> {
+    @first -> {
+        println("At @first");
+        continue; // Must jump sequentially to @second
+    } [1];
+
+    @second -> {
+        println("At @second");
+        // No goto, break, or continue here -> must implicitly leave, NO fallthrough to @third!
+    } [1];
+
+    @third -> {
+        println("ERROR: Should not reach @third!");
+        goto @done;
+    } [1];
+
+    @done -> {
+        leave;
+    } [1];
+
+    handle -> {
+        fn call() -> int32 {
+            goto @first;
+        }
+        fn leave() -> int32 {
+            println("Implicit leave executed cleanly");
+            return 42;
+        }
+    }
+}
+
+// State Machine with error handle catching limit breach
+machine BoundedErrorMachine -> {
+    @start -> {
+        goto -> @loop;
+    } [1];
+
+    @loop -> {
+        goto -> @loop;
+    } [2];
+
+    handle -> {
+        fn call() -> int32 {
+            goto -> @start;
+        }
+        fn error(e: Error) -> int32 {
+            println("Caught limit breach error successfully: ", e.message);
+            return 99;
+        }
+        fn leave() -> int32 {
+            return 0;
+        }
+    }
+}
+
 fn main() -> int32 {
     int32 result = CounterMachine();
     println("Final Machine Count: ", result); // EXPECT: Final Machine Count: 5
 
+    int32 step_res = StepperMachine();
+    println("Stepper Machine Result: ", step_res); // EXPECT: Stepper Machine Result: 42
+
+    int32 err_res = BoundedErrorMachine();
+    println("Bounded Error Machine Handled Result: ", err_res); // EXPECT: Bounded Error Machine Handled Result: 99
+
     println("ALL 09_SCOPES TESTS PASSED"); // EXPECT: ALL 09_SCOPES TESTS PASSED
     return 0;
 }
+

@@ -182,6 +182,7 @@ impl SemanticAnalyzer {
         if let Some(Decl::LabelDecl {
             name: last_lbl_name,
             body: last_body,
+            ..
         }) = labels.last()
         {
             fn stmts_contain_continue(stmts: &[Stmt]) -> bool {
@@ -223,7 +224,7 @@ impl SemanticAnalyzer {
 
         let mut label_vars: HashMap<String, HashMap<String, BaseType>> = HashMap::new();
         for label_decl in labels {
-            if let Decl::LabelDecl { name: l_name, body } = label_decl {
+            if let Decl::LabelDecl { name: l_name, body, .. } = label_decl {
                 let clean_name = l_name.replace("@", "");
                 let mut vars = HashMap::new();
                 for s in body {

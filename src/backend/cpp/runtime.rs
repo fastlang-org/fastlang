@@ -3,10 +3,48 @@ pub fn generate_runtime_header() -> String {
 #include <variant>
 #include <cstdint>
 #include <type_traits>
-#include <functional>
 #include <cstring>
 #include <vector>
 #include <memory>
+
+template <typename Ret, typename... Args>
+struct fastlang_fn_ptr {
+    void* ctx = nullptr;
+    Ret (*invoke)(void* ctx, Args...) = nullptr;
+
+    constexpr fastlang_fn_ptr() = default;
+    constexpr fastlang_fn_ptr(std::nullptr_t) : ctx(nullptr), invoke(nullptr) {}
+
+    constexpr fastlang_fn_ptr(Ret (*fn)(Args...))
+        : ctx(reinterpret_cast<void*>(fn)),
+          invoke([](void* c, Args... args) -> Ret {
+              auto f = reinterpret_cast<Ret (*)(Args...)>(c);
+              if constexpr (std::is_void_v<Ret>) {
+                  f(static_cast<Args&&>(args)...);
+              } else {
+                  return f(static_cast<Args&&>(args)...);
+              }
+          }) {}
+
+    template <typename F, typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, fastlang_fn_ptr>>>
+    fastlang_fn_ptr(F&& f)
+        : ctx(reinterpret_cast<void*>(&f)),
+          invoke([](void* c, Args... args) -> Ret {
+              auto& fn = *reinterpret_cast<std::decay_t<F>*>(c);
+              if constexpr (std::is_void_v<Ret>) {
+                  fn(static_cast<Args&&>(args)...);
+              } else {
+                  return fn(static_cast<Args&&>(args)...);
+              }
+          }) {}
+
+    inline Ret operator()(Args... args) const {
+        return invoke(ctx, static_cast<Args&&>(args)...);
+    }
+    inline explicit operator bool() const {
+        return invoke != nullptr;
+    }
+};
 
 using type = const char*;
 // ============================================================================

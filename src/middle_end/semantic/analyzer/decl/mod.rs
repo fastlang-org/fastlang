@@ -181,7 +181,7 @@ impl SemanticAnalyzer {
                 self.visit_micro_decl(visibility, name, params, return_type, body, generics)
             }
 
-            Decl::LabelDecl { name, body } => {
+            Decl::LabelDecl { name, body, .. } => {
                 self.visit_label_decl(name, body)
             }
 

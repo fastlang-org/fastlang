@@ -235,6 +235,7 @@ x {};
 // ex: that machine will apply some of the need it updates
 machine<int32> counter {
     @init[1] {
+        set runOnce = true;
         local := 10;
         this {
             count := 0;
@@ -2140,3 +2141,52 @@ if(x == 10){  // so that will override the if scope and make it handle errors fo
 // we will support lua , js , css , sql , cpp , c , asm 
 // we will create a way to support tailwind css or we maay make something like it 
 // todo : rgb , colors
+
+
+// new machine support
+machine<int32> counter {
+    set start {
+        //set runOnce = true;
+        local := 10;
+        this {
+            count := 0;
+        }
+        goto step;
+    }[1];
+    set step  {
+        count = count + 1;
+        if (count >= max_limit) {
+            goto finish;
+        }
+        this {
+            count = count + 1;
+        }
+        goto step;
+    }[max_limit + 1];
+    set finish {
+        leave;
+    }[];
+    handle -> {
+        fn call() -> int32 {
+            goto start;
+        }
+        fn leave() -> int32 {
+            return this.count;
+        }
+    }
+}
+{}[];
+{
+}[1]();
+fn i_run_3_times() -> int32 {
+  print("i_run_3_times");
+}[3](); // that will run it 1 times and there 2 times you can it still use  for it
+{
+    print("i_run_3_times");
+}[3](); // error : name the block to set the run count
+@init {
+
+}[1];
+@c {
+
+}[];

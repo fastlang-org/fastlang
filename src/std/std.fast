@@ -22,10 +22,10 @@ public @compile :: {
     set system() -> System;
     impl type<T> -> {
         set printable() -> bool;
-        set as_str() -> str;
+        set as_str() -> str; 
         set is_pointer() -> bool;
         set is_array() -> bool;
-        set is_const() -> bool;
+       // set is_const() -> bool;
         set is_constant() -> bool;
         set is_undefined() -> bool;
         set is_runtime() -> bool;
