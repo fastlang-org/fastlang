@@ -99,8 +99,8 @@ impl Interpreter {
                 let elements = match iter_val {
                     Expr::ArrayLiteral(elems) => elems,
                     Expr::Identifier(id) => {
-                        if let Ok(Expr::ArrayLiteral(elems)) = self.env.get(&id) {
-                            elems
+                        if let Some(Expr::ArrayLiteral(elems)) = self.env.get_ref(&id) {
+                            elems.clone()
                         } else {
                             Vec::new()
                         }
@@ -159,8 +159,8 @@ impl Interpreter {
                 if let Expr::Identifier(name) = target {
                     if op == "=" {
                         self.env.assign(name, val)?;
-                    } else if let Ok(cur) = self.env.get(name) {
-                        if let Some(res) = apply_reassign_op(&cur, op, &val) {
+                    } else if let Some(cur) = self.env.get_ref(name) {
+                        if let Some(res) = apply_reassign_op(cur, op, &val) {
                             self.env.assign(name, res)?;
                         }
                     }
@@ -359,12 +359,12 @@ impl Interpreter {
                     }
                     let all_literals = true;
                     for a in args.iter() {
-                        let resolved = if let Expr::Identifier(id) = a {
-                            self.env.get(id).unwrap_or_else(|_| a.clone())
+                        let is_lit = if let Expr::Identifier(id) = a {
+                            self.env.get_ref(id).map_or_else(|| is_literal(a), is_literal)
                         } else {
-                            a.clone()
+                            is_literal(a)
                         };
-                        if !is_literal(&resolved) {
+                        if !is_lit {
                             return Err(format!(
                                 "Compile Error: Argument '{}' in @compile validation cannot be evaluated at compile time. Dynamic runtime values are rejected.",
                                 self.format_expr_for_print(a)
@@ -416,9 +416,9 @@ impl Interpreter {
                             } else {
                                 None
                             }
-                        } else if let Ok(cur) = self.env.get(id) {
-                            if is_literal(value) && is_literal(&cur) {
-                                apply_reassign_op(&cur, op, value)
+                        } else if let Some(cur) = self.env.get_ref(id) {
+                            if is_literal(value) && is_literal(cur) {
+                                apply_reassign_op(cur, op, value)
                             } else {
                                 None
                             }

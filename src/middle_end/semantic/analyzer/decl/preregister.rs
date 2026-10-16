@@ -22,45 +22,63 @@ impl SemanticAnalyzer {
             }
             Decl::CompileDecl { name, decls } => {
                 for d in decls {
-                    let mut namespaced_d = d.clone();
-                    match &mut namespaced_d {
-                        Decl::FnDecl { name: fn_name, .. } => {
-                            *fn_name = format!("{}::{}", name, fn_name);
+                    match d {
+                        Decl::MacroDecl {
+                            name: m_name,
+                            params,
+                            body,
+                            visibility,
+                            ..
+                        } => {
+                            let namespaced_name = format!("{}::{}", name, m_name);
+                            let short_name = m_name.as_str();
+                            let without_dollar = short_name.trim_start_matches('$');
+                            let mut aliases = vec![
+                                namespaced_name.clone(),
+                                format!("{}::{}", name, without_dollar),
+                                short_name.to_string(),
+                                without_dollar.to_string(),
+                            ];
+                            aliases.sort();
+                            aliases.dedup();
+                            for alias in aliases {
+                                let alias_info = SymbolInfo {
+                                    name: alias.clone(),
+                                    kind: SymbolKind::Macro {
+                                        params: params.clone(),
+                                        return_type: BaseType::Void,
+                                        body: body.clone(),
+                                    },
+                                    visibility: visibility.clone(),
+                                    dependencies: vec![],
+                                    is_used: false,
+                                    is_param: false,
+                                    is_uninitialized: false,
+                                    is_compilable: true,
+                                };
+                                self.current_env
+                                    .borrow_mut()
+                                    .define_or_update(alias, alias_info);
+                            }
                         }
-                        Decl::MicroDecl { name: m_name, .. } => {
-                            *m_name = format!("{}::{}", name, m_name);
-                        }
-                        Decl::MacroDecl { name: m_name, .. } => {
-                            *m_name = format!("{}::{}", name, m_name);
-                        }
-                        _ => {}
-                    }
-                    if let Decl::MacroDecl {
-                        name: ref m_name,
-                        params,
-                        body,
-                        visibility,
-                        ..
-                    } = namespaced_d
-                    {
-                        let prefix = format!("{}::", name);
-                        let short_name = m_name.replace(&prefix, "");
-                        let without_dollar = short_name.trim_start_matches('$').to_string();
-                        let aliases = vec![
-                            m_name.clone(),
-                            format!("{}::{}", name, without_dollar),
-                            short_name.clone(),
-                            without_dollar.clone(),
-                        ];
-                        for alias in aliases {
-                            let alias_info = SymbolInfo {
-                                name: alias.clone(),
-                                kind: SymbolKind::Macro {
+                        Decl::FnDecl {
+                            name: fn_name,
+                            generics,
+                            params,
+                            return_type,
+                            body,
+                            ..
+                        } => {
+                            let f_name = format!("{}::{}", name, fn_name);
+                            let fn_info = SymbolInfo {
+                                name: f_name.clone(),
+                                kind: SymbolKind::Function {
                                     params: params.clone(),
-                                    return_type: BaseType::Void,
-                                    body: body.clone(),
+                                    return_type: return_type.clone(),
+                                    generics: generics.clone(),
+                                    body: Some(body.clone()),
                                 },
-                                visibility: visibility.clone(),
+                                visibility: Visibility::Public,
                                 dependencies: vec![],
                                 is_used: false,
                                 is_param: false,
@@ -69,82 +87,55 @@ impl SemanticAnalyzer {
                             };
                             self.current_env
                                 .borrow_mut()
-                                .define_or_update(alias, alias_info);
+                                .define_or_update(f_name, fn_info);
                         }
-                    } else if let Decl::FnDecl {
-                        name: ref f_name,
-                        generics,
-                        params,
-                        return_type,
-                        body,
-                        visibility: _,
-                        ..
-                    } = namespaced_d
-                    {
-                        let fn_info = SymbolInfo {
-                            name: f_name.clone(),
-                            kind: SymbolKind::Function {
-                                params: params.clone(),
-                                return_type: return_type.clone(),
-                                generics: generics.clone(),
-                                body: Some(body.clone()),
-                            },
-                            visibility: Visibility::Public,
-                            dependencies: vec![],
-                            is_used: false,
-                            is_param: false,
-                            is_uninitialized: false,
-                            is_compilable: true,
-                        };
-                        self.current_env
-                            .borrow_mut()
-                            .define_or_update(f_name.clone(), fn_info);
-                    } else if let Decl::MicroDecl {
-                        name: ref m_name,
-                        params,
-                        body,
-                        visibility,
-                        generics,
-                        ..
-                    } = namespaced_d
-                    {
-                        let prefix = format!("{}::", name);
-                        let short_name = m_name.replace(&prefix, "");
-                        let aliases = vec![
-                            m_name.clone(),
-                            format!("{}::{}", name, short_name),
-                            short_name.clone(),
-                        ];
-                        let gen_types: Vec<BaseType> = generics
-                            .as_ref()
-                            .map(|v| v.iter().map(|s| BaseType::from_str(s)).collect())
-                            .unwrap_or_default();
-                        for alias in aliases {
-                            let alias_info = SymbolInfo {
-                                name: alias.clone(),
-                                kind: SymbolKind::Micro {
-                                    params: params.clone(),
-                                    generics: gen_types.clone(),
-                                    body: body.clone(),
-                                },
-                                visibility: visibility.clone(),
-                                dependencies: vec![],
-                                is_used: false,
-                                is_param: false,
-                                is_uninitialized: false,
-                                is_compilable: true,
-                            };
-                            self.current_env
-                                .borrow_mut()
-                                .define_or_update(alias, alias_info);
+                        Decl::MicroDecl {
+                            name: micro_name,
+                            params,
+                            body,
+                            visibility,
+                            generics,
+                            ..
+                        } => {
+                            let m_name = format!("{}::{}", name, micro_name);
+                            let short_name = micro_name.as_str();
+                            let mut aliases = vec![
+                                m_name.clone(),
+                                format!("{}::{}", name, short_name),
+                                short_name.to_string(),
+                            ];
+                            aliases.sort();
+                            aliases.dedup();
+                            let gen_types: Vec<BaseType> = generics
+                                .as_ref()
+                                .map(|v| v.iter().map(|s| BaseType::from_str(s)).collect())
+                                .unwrap_or_default();
+                            for alias in aliases {
+                                let alias_info = SymbolInfo {
+                                    name: alias.clone(),
+                                    kind: SymbolKind::Micro {
+                                        params: params.clone(),
+                                        generics: gen_types.clone(),
+                                        body: body.clone(),
+                                    },
+                                    visibility: visibility.clone(),
+                                    dependencies: vec![],
+                                    is_used: false,
+                                    is_param: false,
+                                    is_uninitialized: false,
+                                    is_compilable: true,
+                                };
+                                self.current_env
+                                    .borrow_mut()
+                                    .define_or_update(alias, alias_info);
+                            }
                         }
-                    } else if let Decl::ImplDecl {
-                        target,
-                        methods,
-                        handle_block,
-                        ..
-                    } = d
-                    {
+                        Decl::ImplDecl {
+                            target,
+                            methods,
+                            handle_block,
+                            ..
+                        } => {
                         let entry =
                             self.global_metadata
                                 .entry(target.clone())
@@ -206,8 +197,10 @@ impl SemanticAnalyzer {
                             }
                         }
                     }
+                    _ => {}
                 }
             }
+        }
             Decl::MacroDecl {
                 name,
                 params,
@@ -215,8 +208,10 @@ impl SemanticAnalyzer {
                 visibility,
                 ..
             } => {
-                let without_dollar = name.trim_start_matches('$').to_string();
-                let aliases = vec![name.clone(), without_dollar];
+                let without_dollar = name.trim_start_matches('$');
+                let mut aliases = vec![name.clone(), without_dollar.to_string()];
+                aliases.sort();
+                aliases.dedup();
                 for alias in aliases {
                     let alias_info = SymbolInfo {
                         name: alias.clone(),
