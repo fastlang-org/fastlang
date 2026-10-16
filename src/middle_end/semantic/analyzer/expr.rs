@@ -299,14 +299,13 @@ impl SemanticAnalyzer {
                             if let SymbolKind::Macro {
                                 params,
                                 return_type,
-                                body,
+                                ..
                             } = &info.kind
                             {
                                 Some((
                                     fn_name.clone(),
                                     params.clone(),
                                     return_type.clone(),
-                                    body.clone(),
                                 ))
                             } else {
                                 None
@@ -318,30 +317,29 @@ impl SemanticAnalyzer {
                         property,
                     } => {
                         let prop_str = if let Expr::Identifier(p) = &**property {
-                            p.clone()
+                            p.as_str()
                         } else {
-                            "".to_string()
+                            ""
                         };
                         let candidates = vec![
                             format!("{}::{}", namespace, prop_str),
                             format!("{}::${}", namespace, prop_str),
-                            prop_str.clone(),
+                            prop_str.to_string(),
                             format!("${}", prop_str),
                         ];
                         let mut found = None;
                         let segments: Vec<&str> = namespace.split("::").collect();
-                        if let Some(info) = self.current_env.borrow().lookup_qualified(&segments, &prop_str) {
+                        if let Some(info) = self.current_env.borrow().lookup_qualified(&segments, prop_str) {
                             if let SymbolKind::Macro {
                                 params,
                                 return_type,
-                                body,
+                                ..
                             } = &info.kind
                             {
                                 found = Some((
                                     format!("{}::{}", namespace, prop_str),
                                     params.clone(),
                                     return_type.clone(),
-                                    body.clone(),
                                 ));
                             }
                         }
@@ -351,14 +349,13 @@ impl SemanticAnalyzer {
                                     if let SymbolKind::Macro {
                                         params,
                                         return_type,
-                                        body,
+                                        ..
                                     } = &info.kind
                                     {
                                         found = Some((
                                             cand,
                                             params.clone(),
                                             return_type.clone(),
-                                            body.clone(),
                                         ));
                                         break;
                                     }
@@ -370,7 +367,7 @@ impl SemanticAnalyzer {
                     _ => None,
                 };
 
-                if let Some((macro_name, params, return_type, _macro_body)) = macro_info {
+                if let Some((macro_name, params, return_type)) = macro_info {
                     if args.len() != params.len() {
                         return Err(format!(
                             "Semantic Error: Macro '{}' expects {} arguments, but got {}.",
