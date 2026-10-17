@@ -23,10 +23,15 @@ impl Parser {
         }
 
         // Check if this is an intrinsic signature declaration: `set name<T>(params) -> return_type;` or `set name() -> return_type;`
-        if let TokenKind::Identifier(name) = &self.peek().kind.clone() {
+        let ident_name = match &self.peek().kind {
+            TokenKind::Identifier(name) => Some(name.clone()),
+            TokenKind::Undefined => Some("undefined".to_string()),
+            _ => None,
+        };
+        if let Some(name) = ident_name {
             if let Some(next) = self.tokens.get(self.current + 1) {
                 if next.kind == TokenKind::Less || next.kind == TokenKind::LParen {
-                    let fn_name = name.clone();
+                    let fn_name = name;
                     self.advance(); // consume name
                     let mut generics = Vec::new();
                     if self.peek().kind == TokenKind::Less {
@@ -283,6 +288,9 @@ impl Parser {
                         self.advance();
                     }
                     match s {
+                        Some(Stmt::ExpressionStmt(expr)) | Some(Stmt::CallStmt(expr)) => {
+                            vec![Stmt::ReturnStmt(Some(expr))]
+                        }
                         Some(st) => vec![st],
                         None => vec![],
                     }
@@ -319,6 +327,9 @@ impl Parser {
                         self.advance();
                     }
                     match s {
+                        Some(Stmt::ExpressionStmt(expr)) | Some(Stmt::CallStmt(expr)) => {
+                            vec![Stmt::ReturnStmt(Some(expr))]
+                        }
                         Some(st) => vec![st],
                         None => vec![],
                     }
@@ -497,6 +508,7 @@ impl Parser {
             || op == TokenKind::MinusAssign
             || op == TokenKind::MulAssign
             || op == TokenKind::DivAssign
+            || op == TokenKind::ModAssign
             || op == TokenKind::Walrus
             || op == TokenKind::Colon
         {
@@ -524,9 +536,7 @@ impl Parser {
                     else_block: None,
                 });
             }
-            if self.peek().kind == TokenKind::Comma {
-                self.advance();
-            } else if self.peek().kind == TokenKind::SemiColon {
+            if self.peek().kind == TokenKind::Comma || self.peek().kind == TokenKind::SemiColon {
                 self.advance();
             } else if self.peek().kind != TokenKind::RBrace {
                 self.consume(
@@ -538,8 +548,8 @@ impl Parser {
         }
 
         // Command-style macro / function invocation: `callee arg1, arg2;`
-        if matches!(&expr, Expr::Identifier(_) | Expr::NamespaceAccess { .. }) {
-            if !self.is_at_end()
+        if matches!(&expr, Expr::Identifier(_) | Expr::NamespaceAccess { .. })
+            && !self.is_at_end()
                 && self.peek().kind != TokenKind::SemiColon
                 && self.peek().kind != TokenKind::RBrace
                 && self.peek().kind != TokenKind::RParen
@@ -561,7 +571,6 @@ impl Parser {
                     args,
                 }));
             }
-        }
 
         let base_stmt = Stmt::ExpressionStmt(expr);
         if self.peek().kind == TokenKind::If {
@@ -607,6 +616,7 @@ impl Parser {
             || op == TokenKind::MinusAssign
             || op == TokenKind::MulAssign
             || op == TokenKind::DivAssign
+            || op == TokenKind::ModAssign
         {
             self.advance(); // consume '=' or '->' or '+=' etc
             let value = self.parse_expression()?;

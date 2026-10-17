@@ -202,6 +202,7 @@ impl Interpreter {
     }
 
 
+    #[allow(clippy::type_complexity)]
     pub fn try_split_mixed_branches(
         &mut self,
         decl: &Decl,
@@ -226,33 +227,28 @@ impl Interpreter {
                 if let Stmt::IfStmt { condition, .. } = s {
                     if !expr_references_params(condition, params, generics) {
                         let mut cond_clone = condition.clone();
-                        if self.fold_expr(&mut cond_clone).is_ok() {
-                            if matches!(cond_clone, Expr::LiteralBool(_)) {
+                        if self.fold_expr(&mut cond_clone).is_ok()
+                            && matches!(cond_clone, Expr::LiteralBool(_)) {
                                 continue;
                             }
-                        }
                     }
                     if is_compile_condition(condition) {
                         let mut curr = s;
-                        loop {
-                            if let Stmt::IfStmt {
-                                condition: c,
-                                then_block: tb,
-                                else_block: eb,
-                            } = curr
-                            {
-                                raw_branches.push((Some(c.clone()), tb.clone()));
-                                if let Some(else_stmts) = eb {
-                                    if else_stmts.len() == 1
-                                        && matches!(&else_stmts[0], Stmt::IfStmt { .. })
-                                    {
-                                        curr = &else_stmts[0];
-                                        continue;
-                                    } else {
-                                        raw_branches.push((None, else_stmts.clone()));
-                                        break;
-                                    }
+                        while let Stmt::IfStmt {
+                            condition: c,
+                            then_block: tb,
+                            else_block: eb,
+                        } = curr
+                        {
+                            raw_branches.push((Some(c.clone()), tb.clone()));
+                            if let Some(else_stmts) = eb {
+                                if else_stmts.len() == 1
+                                    && matches!(&else_stmts[0], Stmt::IfStmt { .. })
+                                {
+                                    curr = &else_stmts[0];
+                                    continue;
                                 } else {
+                                    raw_branches.push((None, else_stmts.clone()));
                                     break;
                                 }
                             } else {
@@ -459,7 +455,7 @@ impl Interpreter {
                         if has_compile_operations(then_block)
                             || else_block
                                 .as_ref()
-                                .map_or(false, |eb| has_compile_operations(eb))
+                                .is_some_and(|eb| has_compile_operations(eb))
                         {
                             return Err("Compile Error: Dynamic conditions cannot contain @compile blocks or @compile::throw".to_string());
                         }
@@ -492,28 +488,25 @@ impl Interpreter {
                 } => {
                     let mut prev_vars = Vec::new();
                     if let Some(i) = init {
-                        match &mut **i {
-                            Stmt::Declaration(Decl::VarDecl {
+                        if let Stmt::Declaration(Decl::VarDecl {
                                 name,
                                 type_node,
                                 value,
                                 ..
-                            }) => {
-                                self.fold_expr(value)?;
-                                let mut ty_name = self.resolve_type_str(&type_node.as_str());
-                                if (ty_name == "unknown" || ty_name == "auto")
-                                    && !matches!(value, Expr::LiteralVoid)
-                                {
-                                    let inferred = self.get_expr_type(value);
-                                    if inferred != "unknown" {
-                                        ty_name = inferred;
-                                    }
+                            }) = &mut **i {
+                            self.fold_expr(value)?;
+                            let mut ty_name = self.resolve_type_str(&type_node.as_str());
+                            if (ty_name == "unknown" || ty_name == "auto")
+                                && !matches!(value, Expr::LiteralVoid)
+                            {
+                                let inferred = self.get_expr_type(value);
+                                if inferred != "unknown" {
+                                    ty_name = inferred;
                                 }
-                                let prev = self.var_types.get(name).cloned();
-                                self.var_types.insert(name.clone(), ty_name);
-                                prev_vars.push((name.clone(), prev));
                             }
-                            _ => {}
+                            let prev = self.var_types.get(name).cloned();
+                            self.var_types.insert(name.clone(), ty_name);
+                            prev_vars.push((name.clone(), prev));
                         }
                     }
                     if let Some(c) = condition {
@@ -611,13 +604,20 @@ impl Interpreter {
                                 }
                                 _ => "".to_string(),
                             };
-                            let clean_enum = self.extract_clean_blueprint_name(switch_type);
-                            if clean_enum == "Option" && variant_name == "Some" && args.len() == 1 {
+                            if args.len() == 1 {
                                 if let Expr::Identifier(var_name) = &args[0] {
                                     if switch_type.contains('<') && switch_type.ends_with('>') {
                                         let start = switch_type.find('<').unwrap() + 1;
                                         let end = switch_type.rfind('>').unwrap();
-                                        let inner_t = switch_type[start..end].trim().to_string();
+                                        let generic_part = &switch_type[start..end];
+                                        let gen_types: Vec<&str> = generic_part.split(',').map(|s| s.trim()).collect();
+                                        let inner_t = if gen_types.len() == 1 {
+                                            gen_types[0].to_string()
+                                        } else if variant_name == "Err" && gen_types.len() > 1 {
+                                            gen_types[1].to_string()
+                                        } else {
+                                            gen_types[0].to_string()
+                                        };
                                         self.var_types.insert(var_name.clone(), inner_t);
                                         inserted_vars.push(var_name.clone());
                                     }

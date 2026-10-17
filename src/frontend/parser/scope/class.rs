@@ -75,8 +75,8 @@ impl Parser {
                             constructor = c;
                         }
                         Err(e) => {
-                            eprintln!("Syntax Error in scope constructor: {}", e);
                             self.synchronize();
+                            return Err(format!("Syntax Error in scope constructor: {}", e));
                         }
                     }
                     used_settings.push(Setting::Constructor);

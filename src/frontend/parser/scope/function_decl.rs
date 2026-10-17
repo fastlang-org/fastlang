@@ -243,10 +243,7 @@ impl Parser {
             self.advance();
             let mut stmts = Vec::new();
             while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
-                match self.parse_statement(ScopeType::Block)? {
-                    Some(stmt) => stmts.push(stmt),
-                    None => {}
-                }
+                if let Some(stmt) = self.parse_statement(ScopeType::Block)? { stmts.push(stmt) }
             }
             self.consume(TokenKind::RBrace, "Expected '}' to close micro body")?;
             stmts

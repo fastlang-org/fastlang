@@ -1,10 +1,16 @@
 use crate::frontend::parser::ast::Expr;
-use std::{collections::HashMap, mem::replace};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct InterpreterEnv {
     variables: HashMap<String, Expr>,
     parent: Option<Box<InterpreterEnv>>,
+}
+
+impl Default for InterpreterEnv {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InterpreterEnv {
@@ -23,7 +29,7 @@ impl InterpreterEnv {
     }
 
     pub fn push_scope(&mut self) {
-        let old = replace(self, InterpreterEnv::new());
+        let old = std::mem::take(self);
         *self = InterpreterEnv::with_parent(old);
     }
 
@@ -60,7 +66,7 @@ impl InterpreterEnv {
 
     pub fn contains(&self, name: &str) -> bool {
         self.variables.contains_key(name)
-            || self.parent.as_ref().map_or(false, |p| p.contains(name))
+            || self.parent.as_ref().is_some_and(|p| p.contains(name))
     }
 
     pub fn get(&self, name: &str) -> Result<Expr, String> {

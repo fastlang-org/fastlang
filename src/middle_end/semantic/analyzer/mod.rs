@@ -39,7 +39,7 @@ impl ScopeContext {
     }
 
     pub fn is_member_context(&self) -> bool {
-        self.in_class || self.in_struct || self.current_type_name.is_some()
+        self.in_class || self.in_struct || self.current_type_name.is_some() || self.current_machine.is_some()
     }
 }
 
@@ -134,8 +134,24 @@ impl SemanticAnalyzer {
         column: Option<usize>,
         hint: Option<&str>,
     ) {
+        let (resolved_line, resolved_col) = match (line, column) {
+            (Some(l), Some(c)) => (Some(l), Some(c)),
+            _ => {
+                if let Some(ref src) = self.diagnostics.source_code {
+                    let (l, c) = crate::locate_semantic_error_in_source(src, message);
+                    if l > 0 && c > 0 {
+                        (Some(l), Some(c))
+                    } else {
+                        (None, None)
+                    }
+                } else {
+                    (None, None)
+                }
+            }
+        };
+
         eprintln!("\x1b[33;1mwarning:\x1b[0m {}", message);
-        if let (Some(l), Some(c)) = (line, column) {
+        if let (Some(l), Some(c)) = (resolved_line, resolved_col) {
             let file_display = if self.diagnostics.current_file.is_empty() {
                 "<input>"
             } else {
@@ -237,7 +253,7 @@ impl SemanticAnalyzer {
             .unwrap_or_else(|| "main".to_string());
         self.dependency_graph
             .entry(ctx)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(dep);
     }
 
@@ -258,11 +274,10 @@ impl SemanticAnalyzer {
         reachable.insert("main".to_string());
 
         for (name, info) in &self.current_env.borrow().symbols {
-            if info.is_used {
-                if reachable.insert(name.clone()) {
+            if info.is_used
+                && reachable.insert(name.clone()) {
                     queue.push(name.clone());
                 }
-            }
         }
 
         while let Some(curr) = queue.pop() {
@@ -295,11 +310,10 @@ impl SemanticAnalyzer {
                 // curr is a top-level symbol or type name
                 // If it's a type name: automatically include its init, drop, and all handles
                 let init_sym = format!("{}::init", curr);
-                if self.dependency_graph.contains_key(&init_sym) {
-                    if reachable.insert(init_sym.clone()) {
+                if self.dependency_graph.contains_key(&init_sym)
+                    && reachable.insert(init_sym.clone()) {
                         queue.push(init_sym);
                     }
-                }
                 if let Some(bp) = self.current_env.borrow().lookup_blueprint(&curr) {
                     for h_name in bp.handle_signatures.keys() {
                         let h_sym = format!("{}::{}", curr, h_name);
@@ -317,11 +331,10 @@ impl SemanticAnalyzer {
                     }
                 }
                 let drop_sym = format!("{}::drop", curr);
-                if self.dependency_graph.contains_key(&drop_sym) {
-                    if reachable.insert(drop_sym.clone()) {
+                if self.dependency_graph.contains_key(&drop_sym)
+                    && reachable.insert(drop_sym.clone()) {
                         queue.push(drop_sym);
                     }
-                }
                 // If curr is a derived class, check if any virtual methods of its base were already reached
                 if let Some(base) = self.class_hierarchy.get(&curr) {
                     for sym in &reachable.clone() {

@@ -1,10 +1,10 @@
 use crate::frontend::parser::ast::*;
-use crate::middle_end::interpreter::intrinsics::CompilerIntrinsics;
-use crate::middle_end::interpreter::Interpreter;
 use crate::middle_end::interpreter::env::InterpreterEnv;
 use crate::middle_end::interpreter::eval::{
     expr_contains_this, is_known_type_name, is_literal, strip_type_wrapper,
 };
+use crate::middle_end::interpreter::intrinsics::CompilerIntrinsics;
+use crate::middle_end::interpreter::Interpreter;
 
 impl Interpreter {
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Expr, String> {
@@ -26,17 +26,17 @@ impl Interpreter {
                     BaseType::New(n) => n.clone(),
                     _ => target_type.as_str(),
                 };
-                let resolved_target = if let Some(Expr::LiteralString(s)) = self.env.get_ref(&target_name)
-                {
-                    let clean = if s.starts_with("type<") && s.ends_with('>') {
-                        &s[5..s.len() - 1]
+                let resolved_target =
+                    if let Some(Expr::LiteralString(s)) = self.env.get_ref(&target_name) {
+                        let clean = if s.starts_with("type<") && s.ends_with('>') {
+                            &s[5..s.len() - 1]
+                        } else {
+                            s.as_str()
+                        };
+                        BaseType::from_str(clean)
                     } else {
-                        s.as_str()
+                        target_type.clone()
                     };
-                    BaseType::from_str(clean)
-                } else {
-                    target_type.clone()
-                };
                 self.fastlang_cast(&val, &resolved_target)
             }
             Expr::UnaryOp { operator, operand } => {
@@ -104,18 +104,18 @@ impl Interpreter {
                 }
                 let ft = self.get_fast_type(&type_name);
                 match property.as_str() {
-                    "is_primitive" => Ok(Expr::LiteralBool(ft.is_primitive())),
-                    "is_pointer" => Ok(Expr::LiteralBool(ft.is_pointer())),
-                    "is_array" => Ok(Expr::LiteralBool(ft.is_array())),
-                    "printable" | "is_printable" => Ok(Expr::LiteralBool(ft.printable())),
-                    "throwable" | "is_throwable" => Ok(Expr::LiteralBool(ft.throwable())),
-                    "shareable" | "is_shareable" => Ok(Expr::LiteralBool(ft.shareable())),
-                    "copyable" | "is_copyable" => Ok(Expr::LiteralBool(ft.copyable())),
-                    "castable" | "is_castable" => Ok(Expr::LiteralBool(ft.castable())),
-                    "is_constant" | "is_const" => Ok(Expr::LiteralBool(ft.is_constant())),
-                    "is_runtime" => Ok(Expr::LiteralBool(ft.is_runtime())),
-                    "is_comptime" => Ok(Expr::LiteralBool(ft.is_comptime())),
-                    "is_undefined" => Ok(Expr::LiteralBool(ft.is_undefined())),
+                    "primitive" => Ok(Expr::LiteralBool(ft.is_primitive())),
+                    "pointer" => Ok(Expr::LiteralBool(ft.is_pointer())),
+                    "array" => Ok(Expr::LiteralBool(ft.is_array())),
+                    "printable" => Ok(Expr::LiteralBool(ft.printable())),
+                    "throwable" => Ok(Expr::LiteralBool(ft.throwable())),
+                    "shareable" => Ok(Expr::LiteralBool(ft.shareable())),
+                    "copyable" => Ok(Expr::LiteralBool(ft.copyable())),
+                    "castable" => Ok(Expr::LiteralBool(ft.castable())),
+                    "constant" => Ok(Expr::LiteralBool(ft.is_constant())),
+                    "runtime" => Ok(Expr::LiteralBool(ft.is_runtime())),
+                    "comptime" => Ok(Expr::LiteralBool(ft.is_comptime())),
+                    "undefined" => Ok(Expr::LiteralBool(ft.is_undefined())),
                     "on_heap" => Ok(Expr::LiteralBool(ft.on_heap())),
                     "on_stack" => Ok(Expr::LiteralBool(ft.on_stack())),
                     "as_str" => {
@@ -361,30 +361,18 @@ impl Interpreter {
                     if is_type_reflection {
                         let ft = self.get_fast_type(&type_name);
                         match property.as_str() {
-                            "is_primitive" => return Ok(Expr::LiteralBool(ft.is_primitive())),
-                            "is_pointer" => return Ok(Expr::LiteralBool(ft.is_pointer())),
-                            "is_array" => return Ok(Expr::LiteralBool(ft.is_array())),
-                            "printable" | "is_printable" => {
-                                return Ok(Expr::LiteralBool(ft.printable()))
-                            }
-                            "throwable" | "is_throwable" => {
-                                return Ok(Expr::LiteralBool(ft.throwable()))
-                            }
-                            "shareable" | "is_shareable" => {
-                                return Ok(Expr::LiteralBool(ft.shareable()))
-                            }
-                            "copyable" | "is_copyable" => {
-                                return Ok(Expr::LiteralBool(ft.copyable()))
-                            }
-                            "castable" | "is_castable" => {
-                                return Ok(Expr::LiteralBool(ft.castable()))
-                            }
-                            "is_constant" | "is_const" => {
-                                return Ok(Expr::LiteralBool(ft.is_constant()))
-                            }
-                            "is_runtime" => return Ok(Expr::LiteralBool(ft.is_runtime())),
-                            "is_comptime" => return Ok(Expr::LiteralBool(ft.is_comptime())),
-                            "is_undefined" => return Ok(Expr::LiteralBool(ft.is_undefined())),
+                            "primitive" => return Ok(Expr::LiteralBool(ft.is_primitive())),
+                            "pointer" => return Ok(Expr::LiteralBool(ft.is_pointer())),
+                            "array" => return Ok(Expr::LiteralBool(ft.is_array())),
+                            "printable" => return Ok(Expr::LiteralBool(ft.printable())),
+                            "throwable" => return Ok(Expr::LiteralBool(ft.throwable())),
+                            "shareable" => return Ok(Expr::LiteralBool(ft.shareable())),
+                            "copyable" => return Ok(Expr::LiteralBool(ft.copyable())),
+                            "castable" => return Ok(Expr::LiteralBool(ft.castable())),
+                            "constant" => return Ok(Expr::LiteralBool(ft.is_constant())),
+                            "runtime" => return Ok(Expr::LiteralBool(ft.is_runtime())),
+                            "comptime" => return Ok(Expr::LiteralBool(ft.is_comptime())),
+                            "undefined" => return Ok(Expr::LiteralBool(ft.is_undefined())),
                             "on_heap" => return Ok(Expr::LiteralBool(ft.on_heap())),
                             "on_stack" => return Ok(Expr::LiteralBool(ft.on_stack())),
                             "has_handle" => {
@@ -762,6 +750,4 @@ impl Interpreter {
             _ => Ok(expr.clone()),
         }
     }
-
 }
-

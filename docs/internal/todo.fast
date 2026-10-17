@@ -2190,3 +2190,76 @@ fn i_run_3_times() -> int32 {
 @c {
 
 }[];
+// we will add labelLimitError class
+class labelLimitError extends Error {
+   public {
+    set labelname := @default; // that will be a built-in typed field acual type = str 
+    // but it will be used to make so many things to be easier
+    usize limit;
+    usize count;
+    }
+    constructor {
+        init (labelname : str ,msg := "label limit exceeded", limit : usize, count : usize , code : int32) -> {
+            super(msg , code);
+            this.labelname = labelname;
+            this.limit = limit;
+            this.count = count;
+        }
+    }
+    handle -> {
+        fn $throw() -> labelLimitError {
+            return this;
+        }
+        }
+}
+machine CounterMachine -> {
+    @init -> {
+        this { 
+         count := 0;
+         max_limit := 5;
+        }
+        goto  @step1;
+    } [1];
+    @step1  {
+        count = count + 1;
+        if (count >= max_limit) {
+            goto @finish;
+        }
+        goto @step1;
+    } [10];
+    @step2 {
+        count = count + 1;
+        if (count >= max_limit) {
+            goto @finish;
+        }
+        goto @step2;
+    }
+    @finish {
+        leave;
+    } [1];
+    handle -> {
+        fn call() -> int32 {
+            goto @init;
+        }
+        fn leave() -> int32 {
+            return this.count;
+        }
+        fn error(e: labelLimitError) -> int32 {
+        if (e.labelname == @step1) {
+            goto @step2;
+        }else{
+            goto @finish;
+        }
+        }
+    }
+}
+enum X use uint8 { // or enum X : uint8 {
+    [0] = A, // like in lua  array 
+    [31] = B{
+        int32 x;
+        int32 y;
+    },
+    [99] = C(int32),
+}
+
+ print(X[0]); // that will print A

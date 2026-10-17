@@ -1,0 +1,9 @@
+class Zcl {
+    public -> {
+    int32 x;
+}
+}
+fn main() {
+    x
+    Zcl y = new Zcl();
+}

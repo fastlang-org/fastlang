@@ -1,11 +1,30 @@
 pub fn generate_runtime_header() -> String {
     r#"#pragma once
-#include <variant>
 #include <cstdint>
-#include <type_traits>
+#include <cstdio>
 #include <cstring>
-#include <vector>
-#include <memory>
+#include <cstdlib>
+#include <new>
+#include <utility>
+#include <initializer_list>
+#include <type_traits>
+
+#ifndef FASTLANG_ALLOC_DEFINED
+#define FASTLANG_ALLOC_DEFINED
+static inline void* fast_alloc(size_t size) {
+    void* ptr = malloc(size);
+    if (ptr) {
+        memset(ptr, 0, size);
+    }
+    return ptr;
+}
+
+static inline void fast_free(void* ptr) {
+    if (ptr) {
+        free(ptr);
+    }
+}
+#endif
 
 template <typename Ret, typename... Args>
 struct fastlang_fn_ptr {
@@ -26,17 +45,42 @@ struct fastlang_fn_ptr {
               }
           }) {}
 
-    template <typename F, typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, fastlang_fn_ptr>>>
-    fastlang_fn_ptr(F&& f)
-        : ctx(reinterpret_cast<void*>(&f)),
-          invoke([](void* c, Args... args) -> Ret {
-              auto& fn = *reinterpret_cast<std::decay_t<F>*>(c);
-              if constexpr (std::is_void_v<Ret>) {
-                  fn(static_cast<Args&&>(args)...);
-              } else {
-                  return fn(static_cast<Args&&>(args)...);
-              }
-          }) {}
+    template <typename F, typename = std::enable_if_t<
+        !std::is_same_v<std::decay_t<F>, fastlang_fn_ptr> &&
+        std::is_convertible_v<std::decay_t<F>, Ret (*)(Args...)>
+    >>
+    constexpr fastlang_fn_ptr(F&& f)
+        : fastlang_fn_ptr(static_cast<Ret (*)(Args...)>(f)) {}
+
+    template <typename F, typename = std::enable_if_t<
+        !std::is_same_v<std::decay_t<F>, fastlang_fn_ptr> &&
+        !std::is_convertible_v<std::decay_t<F>, Ret (*)(Args...)>
+    >, int = 0>
+    fastlang_fn_ptr(F&& f) {
+        using Decayed = std::decay_t<F>;
+        if constexpr (sizeof(Decayed) <= sizeof(void*) && std::is_trivially_copyable_v<Decayed>) {
+            new (&ctx) Decayed(std::forward<F>(f));
+            invoke = [](void* c, Args... args) -> Ret {
+                auto& fn = *reinterpret_cast<Decayed*>(&c);
+                if constexpr (std::is_void_v<Ret>) {
+                    fn(static_cast<Args&&>(args)...);
+                } else {
+                    return fn(static_cast<Args&&>(args)...);
+                }
+            };
+        } else {
+            auto* p = new Decayed(std::forward<F>(f));
+            ctx = p;
+            invoke = [](void* c, Args... args) -> Ret {
+                auto& fn = *reinterpret_cast<Decayed*>(c);
+                if constexpr (std::is_void_v<Ret>) {
+                    fn(static_cast<Args&&>(args)...);
+                } else {
+                    return fn(static_cast<Args&&>(args)...);
+                }
+            };
+        }
+    }
 
     inline Ret operator()(Args... args) const {
         return invoke(ctx, static_cast<Args&&>(args)...);
@@ -55,9 +99,8 @@ using type = const char*;
 template <typename T>
 inline T* fastlang_array_alloc(size_t len) {
     size_t total_bytes = sizeof(size_t) + (len + 1) * sizeof(T);
-    void* mem = std::malloc(total_bytes);
+    void* mem = fast_alloc(total_bytes);
     if (!mem) return nullptr;
-    std::memset(mem, 0, total_bytes);
     size_t* raw = reinterpret_cast<size_t*>(mem);
     raw[0] = len;
     T* data = reinterpret_cast<T*>(raw + 1);
@@ -96,9 +139,8 @@ template <typename T>
 inline T* fastlang_array_create(std::initializer_list<T> list) {
     size_t len = list.size();
     size_t total_bytes = sizeof(size_t) + (len + 1) * sizeof(T);
-    void* mem = std::malloc(total_bytes);
+    void* mem = fast_alloc(total_bytes);
     if (!mem) return nullptr;
-    std::memset(mem, 0, total_bytes);
     size_t* raw = reinterpret_cast<size_t*>(mem);
     raw[0] = len;
     T* data = reinterpret_cast<T*>(raw + 1);
@@ -117,7 +159,7 @@ inline char* fastlang_string_create(std::initializer_list<char> list) {
         len -= 1;
     }
     size_t total_bytes = sizeof(size_t) + len + 1;
-    void* mem = std::malloc(total_bytes);
+    void* mem = fast_alloc(total_bytes);
     if (!mem) return nullptr;
     size_t* raw = reinterpret_cast<size_t*>(mem);
     raw[0] = len;
@@ -134,7 +176,7 @@ inline char* fastlang_string_create_from_ptr(const char* s) {
     if (!s) s = "";
     size_t len = std::strlen(s);
     size_t total_bytes = sizeof(size_t) + len + 1;
-    void* mem = std::malloc(total_bytes);
+    void* mem = fast_alloc(total_bytes);
     if (!mem) return nullptr;
     size_t* raw = reinterpret_cast<size_t*>(mem);
     raw[0] = len;
@@ -148,7 +190,7 @@ inline char32_t* fastlang_ustring_create_from_ptr(const char32_t* s) {
     size_t len = 0;
     while (s[len] != 0) ++len;
     size_t total_bytes = sizeof(size_t) + (len + 1) * sizeof(char32_t);
-    void* mem = std::malloc(total_bytes);
+    void* mem = fast_alloc(total_bytes);
     if (!mem) return nullptr;
     size_t* raw = reinterpret_cast<size_t*>(mem);
     raw[0] = len;
@@ -182,13 +224,13 @@ struct fastlang_strbuf {
     char* finalize() {
         if (!data) return fastlang_string_create_from_ptr("");
         size_t total_bytes = sizeof(size_t) + length + 1;
-        void* mem = std::malloc(total_bytes);
-        if (!mem) { std::free(data); return nullptr; }
+        void* mem = fast_alloc(total_bytes);
+        if (!mem) { fast_free(data); return nullptr; }
         size_t* raw = reinterpret_cast<size_t*>(mem);
         raw[0] = length;
         char* out = reinterpret_cast<char*>(raw + 1);
         std::memcpy(out, data, length + 1);
-        std::free(data);
+        fast_free(data);
         return out;
     }
 };
@@ -201,7 +243,7 @@ inline void fastlang_array_free(T* arr) {
         arr[i].~T();
     }
     size_t* raw = reinterpret_cast<size_t*>(arr) - 1;
-    std::free(raw);
+    fast_free(raw);
 }
 
 namespace fast_std {
@@ -302,11 +344,6 @@ inline bool fastlang_ne(A&& a, B&& b) {
 }
 
 template <typename T, typename = void>
-struct fastlang_has_as_str : std::false_type {};
-template <typename T>
-struct fastlang_has_as_str<T, std::void_t<decltype(std::declval<T>().as_str())>> : std::true_type {};
-
-template <typename T, typename = void>
 struct has_display : std::false_type {};
 template <typename T>
 struct has_display<T, std::void_t<decltype(std::declval<T>().display())>> : std::true_type {};
@@ -331,7 +368,7 @@ inline char* fastlang_uchar_to_utf8(const char32_t* u_str) {
         else byte_count += 4;
     }
     size_t total_bytes = sizeof(size_t) + byte_count + 1;
-    void* mem = std::malloc(total_bytes);
+    void* mem = fast_alloc(total_bytes);
     if (!mem) return nullptr;
     size_t* raw = reinterpret_cast<size_t*>(mem);
     raw[0] = byte_count;
@@ -366,7 +403,7 @@ inline char32_t* fastlang_utf8_to_uchar(const char* s) {
     if (!s) return fastlang_ustring_create_from_ptr(U"");
     size_t s_len = std::strlen(s);
     size_t total_bytes = sizeof(size_t) + (s_len + 1) * sizeof(char32_t);
-    void* mem = std::malloc(total_bytes);
+    void* mem = fast_alloc(total_bytes);
     if (!mem) return nullptr;
     size_t* raw = reinterpret_cast<size_t*>(mem);
     char32_t* buf = reinterpret_cast<char32_t*>(raw + 1);
@@ -457,8 +494,6 @@ inline char* fastlang_as_str(const T& val) {
         return fastlang_string_create_from_ptr(buf);
     } else if constexpr (has_display<Decayed>::value) {
         return fastlang_string_create_from_ptr(const_cast<Decayed&>(val).display());
-    } else if constexpr (fastlang_has_as_str<Decayed>::value) {
-        return fastlang_string_create_from_ptr(const_cast<Decayed&>(val).as_str());
     } else if constexpr (std::is_same_v<Decayed, char32_t>) {
         char32_t single[2] = {val, 0};
         return fastlang_uchar_to_utf8(single);
@@ -487,9 +522,19 @@ inline char* fastlang_to_str(const T& val) {
     return fastlang_as_str(val);
 }
 
+template <typename T, typename = void>
+struct has_tag_member : std::false_type {};
+
+template <typename T>
+struct has_tag_member<T, std::void_t<decltype(std::declval<T>().tag)>> : std::true_type {};
+
 template <typename Target, typename Candidate>
 bool fastlang_match_eq(const Target& target, const Candidate& candidate) {
-    if constexpr (std::is_invocable_r_v<Target, Candidate>) {
+    if constexpr (has_tag_member<Target>::value && std::is_invocable_r_v<Target, Candidate>) {
+        return target.tag == candidate().tag;
+    } else if constexpr (has_tag_member<Target>::value && has_tag_member<Candidate>::value) {
+        return target.tag == candidate.tag;
+    } else if constexpr (std::is_invocable_r_v<Target, Candidate>) {
         return target == candidate();
     } else {
         return target == candidate;
@@ -532,30 +577,92 @@ inline auto fastlang_get_iter(T (&arr)[N]) {
 
 template <typename T = void>
 struct fastlang_spread_acc {
-    std::vector<T> items;
+    T* data = nullptr;
+    size_t capacity = 0;
+    size_t length = 0;
+
+    void ensure_capacity(size_t needed) {
+        if (needed <= capacity) return;
+        size_t new_cap = (capacity == 0) ? 8 : (capacity * 2);
+        while (new_cap < needed) new_cap *= 2;
+        size_t new_bytes = sizeof(size_t) + (new_cap + 1) * sizeof(T);
+        void* new_mem = fast_alloc(new_bytes);
+        if (!new_mem) return;
+        size_t* raw = reinterpret_cast<size_t*>(new_mem);
+        raw[0] = length;
+        T* new_data = reinterpret_cast<T*>(raw + 1);
+        if (data) {
+            for (size_t i = 0; i < length; ++i) {
+                new (&new_data[i]) T(std::move(data[i]));
+                data[i].~T();
+            }
+            size_t* old_raw = reinterpret_cast<size_t*>(data) - 1;
+            fast_free(old_raw);
+        }
+        data = new_data;
+        capacity = new_cap;
+    }
+
     template <typename U>
-    void push_one(const U& x) { items.push_back(static_cast<T>(x)); }
+    void push_one(const U& x) {
+        ensure_capacity(length + 1);
+        if (data) {
+            new (&data[length]) T(static_cast<T>(x));
+            length += 1;
+            (reinterpret_cast<size_t*>(data) - 1)[0] = length;
+        }
+    }
+
     template <typename C>
     void push_spread(const C& c) {
         if constexpr (std::is_pointer_v<std::decay_t<C>>) {
             if (c) {
                 size_t len = fastlang_array_len(c);
+                ensure_capacity(length + len);
                 for (size_t i = 0; i < len; ++i) {
-                    items.push_back(static_cast<T>(c[i]));
+                    new (&data[length]) T(static_cast<T>(c[i]));
+                    length += 1;
+                }
+                if (data) {
+                    (reinterpret_cast<size_t*>(data) - 1)[0] = length;
                 }
             }
         } else {
-            for (auto&& x : c) items.push_back(static_cast<T>(x));
+            for (auto&& x : c) {
+                push_one(x);
+            }
         }
     }
+
     fast_std::array<T> to_array() {
-        if (items.empty()) return fastlang_array_alloc<T>(0);
-        T* arr = fastlang_array_alloc<T>(items.size());
-        for (size_t i = 0; i < items.size(); ++i) arr[i] = items[i];
-        return arr;
+        if (!data || length == 0) {
+            if (data) {
+                size_t* raw = reinterpret_cast<size_t*>(data) - 1;
+                fast_free(raw);
+                data = nullptr;
+            }
+            return fastlang_array_alloc<T>(0);
+        }
+        data[length] = T();
+        T* res = data;
+        data = nullptr;
+        capacity = 0;
+        length = 0;
+        return res;
     }
+
     fast_std::array<T> to_slice() {
         return to_array();
+    }
+
+    ~fastlang_spread_acc() {
+        if (data) {
+            for (size_t i = 0; i < length; ++i) {
+                data[i].~T();
+            }
+            size_t* raw = reinterpret_cast<size_t*>(data) - 1;
+            fast_free(raw);
+        }
     }
 };
 

@@ -37,7 +37,7 @@ impl CodeGenerator {
             Stmt::Declaration(decl) => {
                 self.visit_declaration(decl);
             }
-            Stmt::CompileValidation { .. } => return,
+            Stmt::CompileValidation { .. } => (),
             Stmt::ExpressionStmt(expr) => {
                 if let Expr::Call { callee, .. } = expr {
                     if let Expr::NamespaceAccess { namespace, .. } = &**callee {
@@ -81,16 +81,15 @@ impl CodeGenerator {
                         .as_deref()
                         .and_then(|t| self.find_assign_handle(t, &["arrow"]))
                         .is_some()
+                        || (val_code.starts_with('{') && val_code.ends_with('}'))
                     {
-                        self.emit(&format!("{}.arrow({});", target_code, val_code));
-                    } else if val_code.starts_with('{') && val_code.ends_with('}') {
                         self.emit(&format!("{}.arrow({});", target_code, val_code));
                     } else {
                         self.emit(&format!("{} = {};", target_code, val_code));
                     }
                 } else if op == "=>" {
                     self.emit(&format!("{}.fat_arrow({});", target_code, val_code));
-                } else if op == "=" {
+                } else if op == "=" || op == ":=" {
                     self.emit(&format!("{} = {};", target_code, val_code));
                 } else if op == "+=" {
                     if let Some(_t) = self.match_primitive_target(target, "add_reassign") {
@@ -637,21 +636,21 @@ impl CodeGenerator {
                     let is_ptr = is_raw_ptr
                         || target_type
                             .as_deref()
-                            .map_or(false, |t| t.ends_with('*') || t.starts_with("raw_ptr"));
+                            .is_some_and(|t| t.ends_with('*') || t.starts_with("raw_ptr"));
                     let is_arr = target_type
                         .as_deref()
-                        .map_or(false, |t| t.contains("array") || t.ends_with("[]"));
-                    let clean_t = target_type.as_deref().map(|t| Self::clean_type_name(t));
+                        .is_some_and(|t| t.contains("array") || t.ends_with("[]"));
+                    let clean_t = target_type.as_deref().map(Self::clean_type_name);
                     let has_drop = clean_t
                         .as_deref()
-                        .map_or(false, |t| self.types_with_drop.contains(t));
+                        .is_some_and(|t| self.types_with_drop.contains(t));
 
                     if is_ptr {
                         self.emit(&format!("delete {};", expr_code));
                     } else if is_arr {
                         // Array is managed via value or its backing buffer
                     } else if has_drop {
-                        self.emit(&format!("{}.drop();", expr_code));
+                        self.emit(&format!("{}._fastlang_call_drop();", expr_code));
                     }
                 }
             }
@@ -795,8 +794,11 @@ impl CodeGenerator {
                 self.emit(&format!("case {}:;", yid));
             }
             Stmt::GotoStmt(expr) => {
-                let expr_code = self.visit_expression(expr);
-                let safe_name = expr_code.replace("@", "");
+                let raw_name = match expr {
+                    Expr::Identifier(name) => name.clone(),
+                    _ => self.visit_expression(expr),
+                };
+                let safe_name = raw_name.replace("@", "").replace("\"", "");
                 self.emit(&format!("goto {};", safe_name));
             }
             Stmt::CallStmt(expr) => {

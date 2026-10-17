@@ -63,7 +63,9 @@ impl CodeGenerator {
                 }
 
                 let old_in_class = self.in_class_or_scope;
+                let old_class_name = self.current_class_name.clone();
                 self.in_class_or_scope = true;
+                self.current_class_name = Some(name.clone());
                 self.emit(&format!("struct {} {{", name));
                 self.indent_level += 1;
 
@@ -157,12 +159,13 @@ impl CodeGenerator {
                                 }
                             }
                         }
-                        Stmt::ReassignStmt { target, .. } => {
-                            if let Expr::PropertyAccess { object, property } = target {
-                                if matches!(&**object, Expr::This) && !field_names.contains(property) {
-                                    fields_out.push(format!("int32_t {} = {{}};", property));
-                                    field_names.push(property.clone());
-                                }
+                        Stmt::ReassignStmt {
+                            target: Expr::PropertyAccess { object, property },
+                            ..
+                        } => {
+                            if matches!(&**object, Expr::This) && !field_names.contains(property) {
+                                fields_out.push(format!("int32_t {} = {{}};", property));
+                                field_names.push(property.clone());
                             }
                         }
                         Stmt::Block(inner) => {
@@ -191,7 +194,6 @@ impl CodeGenerator {
                             fields_out.push(format!("size_t __run_count_{} = 0;", clean));
                         }
                         for s in body {
-                            collect_machine_fields(s, &mut field_names, &mut fields_out);
                             collect_label_this_fields(s, &mut field_names, &mut fields_out);
                         }
                     }
@@ -231,18 +233,40 @@ impl CodeGenerator {
                 self.emit(&format!("inline {} operator()() {{", call_ret));
                 self.indent_level += 1;
 
-                if let Some(Decl::FnDecl { .. }) = error_handle {
+                self.emit("int32_t __target_state = 0;");
+                self.emit("while (true) {");
+                self.indent_level += 1;
+
+                if error_handle.is_some() {
                     self.emit("try {");
                     self.indent_level += 1;
                 }
 
+                self.emit("switch (__target_state) {");
+                self.indent_level += 1;
+                self.emit("case 0: {");
+                self.indent_level += 1;
+
                 if let Some(body) = call_body {
                     for s in body {
                         if !matches!(s, Stmt::ThisBlock(_)) {
-                            self.visit_statement(s);
+                            match s {
+                                Stmt::GotoStmt(expr) => {
+                                    let raw_name = match expr {
+                                        Expr::Identifier(name) => name.clone(),
+                                        _ => self.visit_expression(expr),
+                                    };
+                                    let clean = raw_name.replace("@", "").replace("\"", "");
+                                    self.emit(&format!("goto {};", clean));
+                                }
+                                _ => self.visit_statement(s),
+                            }
                         }
                     }
                 }
+
+                self.indent_level -= 1;
+                self.emit("}");
 
                 // Labels in exact source order
                 for i in 0..labels.len() {
@@ -254,17 +278,38 @@ impl CodeGenerator {
                     } = lbl_decl
                     {
                         let clean = lbl_name.replace("@", "");
+                        let state_id = i + 1;
+                        self.emit(&format!("case {}:", state_id));
                         self.emit(&format!("{}: {{", clean));
                         self.indent_level += 1;
                         if let Some(ref expr) = max_runs {
                             let limit_code = self.visit_expression(expr);
+                            self.emit(&format!("if (++this->__run_count_{} > {}) {{", clean, limit_code));
+                            self.indent_level += 1;
                             self.emit(&format!(
-                                "if (++this->__run_count_{} > {}) {{ throw fast_std::Error((std::string(\"Runtime Error: machine '{}' label '{}' exceeded execution limit of \") + std::to_string({})).c_str()); }}",
-                                clean, limit_code, name, lbl_name, limit_code
+                                "throw fast_std::labelLimitError(fastlang_string_create_from_ptr(\"{}\"), {}, this->__run_count_{});",
+                                lbl_name, limit_code, clean
                             ));
+                            self.indent_level -= 1;
+                            self.emit("}");
                         }
                         for s in body {
                             match s {
+                                Stmt::ThisBlock(inner) => {
+                                    for sub in inner {
+                                        if let Stmt::Declaration(Decl::VarDecl {
+                                            name: f_name,
+                                            value,
+                                            ..
+                                        }) = sub
+                                        {
+                                            let val_code = self.visit_expression(value);
+                                            self.emit(&format!("this->{} = {};", f_name, val_code));
+                                        } else {
+                                            self.visit_statement(sub);
+                                        }
+                                    }
+                                }
                                 Stmt::Declaration(Decl::VarDecl {
                                     name: f_name,
                                     value,
@@ -318,6 +363,10 @@ impl CodeGenerator {
                     }
                 }
 
+                self.emit("default: return leave();");
+                self.indent_level -= 1;
+                self.emit("}"); // end switch (__target_state)
+
                 self.emit("return leave();");
 
                 if let Some(Decl::FnDecl {
@@ -332,29 +381,25 @@ impl CodeGenerator {
                     } else {
                         "__e".to_string()
                     };
+                    let err_type = if !err_params.is_empty() {
+                        let t = type_to_cpp(&err_params[0].type_node);
+                        if t.is_empty() {
+                            "fast_std::Error".to_string()
+                        } else {
+                            t
+                        }
+                    } else {
+                        "fast_std::Error".to_string()
+                    };
                     self.emit(&format!(
-                        "}} catch (const fast_std::Error& {}) {{",
-                        catch_param
+                        "}} catch (const {}& {}) {{",
+                        err_type, catch_param
                     ));
                     self.indent_level += 1;
+
+                    // Emit error handler body. Any GotoStmt in error handler sets __target_state and continues!
                     for s in err_body {
-                        self.visit_statement(s);
-                    }
-                    if call_ret != "void" {
-                        self.emit("return leave();");
-                    }
-                    self.indent_level -= 1;
-                    self.emit(&format!(
-                        "}} catch (const fast_std::Error* __{}_ptr) {{",
-                        catch_param
-                    ));
-                    self.indent_level += 1;
-                    self.emit(&format!(
-                        "const fast_std::Error& {} = *__{}_ptr;",
-                        catch_param, catch_param
-                    ));
-                    for s in err_body {
-                        self.visit_statement(s);
+                        self.emit_error_handler_stmt(s, labels);
                     }
                     if call_ret != "void" {
                         self.emit("return leave();");
@@ -362,6 +407,9 @@ impl CodeGenerator {
                     self.indent_level -= 1;
                     self.emit("}");
                 }
+
+                self.indent_level -= 1;
+                self.emit("}"); // end while (true)
 
                 self.indent_level -= 1;
                 self.emit("}");
@@ -492,8 +540,70 @@ impl CodeGenerator {
                 self.indent_level -= 1;
                 self.emit("};");
                 self.in_class_or_scope = old_in_class;
+                self.current_class_name = old_class_name;
             }
 
 
+    }
+
+    pub(crate) fn emit_error_handler_stmt(&mut self, stmt: &Stmt, labels: &[Decl]) {
+        match stmt {
+            Stmt::GotoStmt(expr) => {
+                let raw_name = match expr {
+                    Expr::Identifier(name) => name.clone(),
+                    _ => self.visit_expression(expr),
+                };
+                let clean = raw_name.replace("@", "").replace("\"", "");
+                let state_id = labels
+                    .iter()
+                    .position(|lbl| {
+                        if let Decl::LabelDecl { name: lbl_name, .. } = lbl {
+                            lbl_name.replace("@", "") == clean
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|idx| idx + 1);
+
+                if let Some(sid) = state_id {
+                    self.emit(&format!("__target_state = {};", sid));
+                    self.emit("continue;");
+                } else {
+                    self.emit(&format!("goto {};", clean));
+                }
+            }
+            Stmt::IfStmt {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                let cond_code = self.visit_expression(condition);
+                self.emit(&format!("if ({}) {{", cond_code));
+                self.indent_level += 1;
+                for s in then_block {
+                    self.emit_error_handler_stmt(s, labels);
+                }
+                self.indent_level -= 1;
+                if let Some(eb) = else_block {
+                    self.emit("} else {");
+                    self.indent_level += 1;
+                    for s in eb {
+                        self.emit_error_handler_stmt(s, labels);
+                    }
+                    self.indent_level -= 1;
+                }
+                self.emit("}");
+            }
+            Stmt::Block(stmts) => {
+                self.emit("{");
+                self.indent_level += 1;
+                for s in stmts {
+                    self.emit_error_handler_stmt(s, labels);
+                }
+                self.indent_level -= 1;
+                self.emit("}");
+            }
+            _ => self.visit_statement(stmt),
+        }
     }
 }

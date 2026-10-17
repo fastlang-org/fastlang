@@ -5,17 +5,14 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ProjectType {
+    #[default]
     Bin,
     #[serde(alias = "lib")]
     Module,
 }
 
-impl Default for ProjectType {
-    fn default() -> Self {
-        ProjectType::Bin
-    }
-}
 
 impl ProjectType {
     pub fn from_str_opt(s: &str) -> Option<Self> {
@@ -50,6 +47,8 @@ pub struct PackageConfig {
     pub license: Option<String>,
     #[serde(default)]
     pub backend: Option<String>,
+    #[serde(default)]
+    pub link_flags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -90,6 +89,7 @@ impl FastManifest {
                 authors: None,
                 license: Some("MIT".to_string()),
                 backend: Some("cpp".to_string()),
+                link_flags: None,
             },
             scripts: Some(HashMap::new()),
             dependencies: Some(HashMap::new()),

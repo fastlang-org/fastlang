@@ -375,32 +375,18 @@ impl CodeGenerator {
                             );
                         }
                     }
-                    if is_generic && variants.iter().any(|v| v.name == "Some") {
-                        self.emit(
-                            &format!(
-                                "template <typename... U> {}(const {}<U...>& other) : tag(static_cast<Tag>(other.tag)) {{ if (tag == Tag::Some) {{ new (&storage.v_Some) Some_Payload{{ T(other.storage.v_Some._0) }}; }} }}",
-                                name,
-                                name
-                            )
-                        );
-                        self.emit(
-                            &format!(
-                                "template <typename... U> {}& operator=(const {}<U...>& other) {{ if (reinterpret_cast<const void*>(this) != reinterpret_cast<const void*>(&other)) {{ __destroy(); tag = static_cast<Tag>(other.tag); if (tag == Tag::Some) {{ new (&storage.v_Some) Some_Payload{{ T(other.storage.v_Some._0) }}; }} }} return *this; }}",
-                                name,
-                                name
-                            )
-                        );
-                    }
                     self.emit("bool operator==(Tag t) const { return tag == t; }");
                     self.emit("bool operator!=(Tag t) const { return tag != t; }");
-                    self.emit(&format!(
-                        "bool operator==(const {}& other) const {{ return tag == other.tag; }}",
-                        name
-                    ));
-                    self.emit(&format!(
-                        "bool operator!=(const {}& other) const {{ return tag != other.tag; }}",
-                        name
-                    ));
+                    if payload_variants.is_empty() {
+                        self.emit(&format!(
+                            "bool operator==(const {}& other) const {{ return tag == other.tag; }}",
+                            name
+                        ));
+                        self.emit(&format!(
+                            "bool operator!=(const {}& other) const {{ return tag != other.tag; }}",
+                            name
+                        ));
+                    }
 
                     if let Some(methods) = self.target_impl_methods.get(name).cloned() {
                         let old_in_class = self.in_class_or_scope;
@@ -411,6 +397,12 @@ impl CodeGenerator {
                         self.in_class_or_scope = old_in_class;
                     }
                     if let Some(handles) = self.target_handle_methods.get(name).cloned() {
+                        let old_in_class = self.in_class_or_scope;
+                        self.in_class_or_scope = true;
+                        for h in &handles {
+                            self.visit_declaration(h);
+                        }
+                        self.in_class_or_scope = old_in_class;
                         self.emit_operator_overloads(&Some(handles));
                     }
 
@@ -645,14 +637,7 @@ impl CodeGenerator {
                         &obj_type_str
                     };
                     self.emit(&format!(
-                        "if constexpr (fastlang_has_as_str<{}>::value) {{",
-                        target_t
-                    ));
-                    self.indent_level += 1;
-                    self.emit(&format!("return const_cast<{}&>(obj).as_str();", target_t));
-                    self.indent_level -= 1;
-                    self.emit(&format!(
-                        "}} else if constexpr (has_display<{}>::value) {{",
+                        "if constexpr (has_display<{}>::value) {{",
                         target_t
                     ));
                     self.indent_level += 1;
@@ -773,6 +758,11 @@ impl CodeGenerator {
                     self.emit("        this->drop();");
                     self.emit("    }");
                     self.emit("}");
+                    self.emit(&format!("~{}() {{ this->_fastlang_call_drop(); }}", name));
+                    self.emit(&format!("{}(const {}&) = default;", name, name));
+                    self.emit(&format!("{}& operator=(const {}&) = default;", name, name));
+                    self.emit(&format!("{}({}&& _other) noexcept {{ *this = _other; _other._fastlang_dropped = true; }}", name, name));
+                    self.emit(&format!("{}& operator=({}&& _other) noexcept {{ if (this != &_other) {{ this->_fastlang_call_drop(); *this = _other; _other._fastlang_dropped = true; this->_fastlang_dropped = false; }} return *this; }}", name, name));
                 }
                 for s in static_block {
                     self.visit_declaration(s);
@@ -966,6 +956,12 @@ impl CodeGenerator {
                     self.emit("        this->drop();");
                     self.emit("    }");
                     self.emit("}");
+                    self.emit(&format!("~{}() {{ this->_fastlang_call_drop(); }}", name));
+                    self.emit(&format!("{}() = default;", name));
+                    self.emit(&format!("{}(const {}&) = default;", name, name));
+                    self.emit(&format!("{}& operator=(const {}&) = default;", name, name));
+                    self.emit(&format!("{}({}&& _other) noexcept {{ *this = _other; _other._fastlang_dropped = true; }}", name, name));
+                    self.emit(&format!("{}& operator=({}&& _other) noexcept {{ if (this != &_other) {{ this->_fastlang_call_drop(); *this = _other; _other._fastlang_dropped = true; this->_fastlang_dropped = false; }} return *this; }}", name, name));
                 }
                 self.indent_level -= 1;
                 if !private_block.is_empty() {

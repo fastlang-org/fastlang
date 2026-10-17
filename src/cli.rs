@@ -35,7 +35,7 @@ ARGUMENTS:
 
 OPTIONS:
     -h, --help, -help              Print this help information and exit
-    -d, --debug                    Enable verbose debug and compilation trace output
+    -d, --debug, -v, --verbose     Enable verbose debug and compilation trace output
     --debug-error, --debug-errors  Accumulate and report all semantic errors without generating code
     -o, --output <PATH>            Specify output binary or build directory path
     -I, --include <DIR>            Add module search directory
@@ -81,6 +81,7 @@ EXAMPLES:
     );
 }
 
+#[allow(clippy::result_unit_err)]
 pub fn run_project_tests(project_root: &Path) -> Result<(), ()> {
     let tests_dir = project_root.join("tests");
     if !tests_dir.exists() {
@@ -282,7 +283,7 @@ pub fn handle_subcommands(args: &[String]) -> bool {
     // 3. Subcommand: init [--type bin|lib] [-y]
     if args.len() > 1 && args[1] == "init" {
         let mut p_type: Option<ProjectType> = None;
-        let mut non_interactive = false;
+        let mut _non_interactive = false;
 
         let mut idx = 2;
         while idx < args.len() {
@@ -290,7 +291,7 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                 p_type = ProjectType::from_str_opt(&args[idx + 1]);
                 idx += 2;
             } else if args[idx] == "-y" || args[idx] == "--yes" {
-                non_interactive = true;
+                _non_interactive = true;
                 idx += 1;
             } else {
                 idx += 1;
@@ -299,13 +300,7 @@ pub fn handle_subcommands(args: &[String]) -> bool {
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let proj_name = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("my_project").to_string();
-        let target_type = if let Some(t) = p_type {
-            t
-        } else if non_interactive {
-            ProjectType::Bin
-        } else {
-            ProjectType::Bin
-        };
+        let target_type = p_type.unwrap_or(ProjectType::Bin);
 
         match scaffold::init_project_in_dir(&cwd, proj_name, target_type) {
             Ok(_) => {
@@ -399,7 +394,7 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                     println!("No dependencies registered in known registry.");
                 } else {
                     println!("Known Dependency Registry ({} packages):", list.len());
-                    println!("{:<15} {:<10} {:<45} {}", "NAME", "VERSION", "URL", "DESCRIPTION");
+                    println!("{:<15} {:<10} {:<45} DESCRIPTION", "NAME", "VERSION", "URL");
                     println!("{:-<15} {:-<10} {:-<45} {:-<20}", "", "", "", "");
                     for dep in list {
                         let ver = dep.version.as_deref().unwrap_or("-");
@@ -708,7 +703,7 @@ pub fn parse_cli(args: &[String]) -> CliOptions {
             } else {
                 i += 1;
             }
-        } else if args[i] == "--debug" || args[i] == "-d" {
+        } else if args[i] == "--debug" || args[i] == "-d" || args[i] == "--verbose" || args[i] == "-v" {
             debug = true;
             i += 1;
         } else if args[i] == "--debug-error" || args[i] == "--debug-errors" {

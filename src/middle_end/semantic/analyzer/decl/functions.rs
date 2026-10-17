@@ -2,6 +2,7 @@ use super::super::*;
 use std::collections::HashMap;
 
 impl SemanticAnalyzer {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn visit_fn_decl(
         &mut self,
         visibility: &Visibility,

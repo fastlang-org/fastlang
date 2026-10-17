@@ -5,9 +5,9 @@ blueprint NonPrintable = {
     int32 x;
 }
 
-fn i_print_if_has_as_str_only<T>(val: T) -> void {
-    if (typeof(val).has_method("as_str")) {
-        println(val.as_str());
+fn i_print_if_printable_only<T>(val: T) -> void {
+    if (typeof(val).printable()) {
+        println(val);
     } else {
         @compile::throw new Error("not printable :" + typeof(val).as_str());
     }
@@ -15,6 +15,6 @@ fn i_print_if_has_as_str_only<T>(val: T) -> void {
 
 fn main() -> int32 {
     NonPrintable np = NonPrintable { x: 1 };
-    i_print_if_has_as_str_only(np);
+    i_print_if_printable_only(np);
     return 0;
 }

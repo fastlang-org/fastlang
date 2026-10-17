@@ -92,6 +92,8 @@ pub fn is_known_type_name(s: &str) -> bool {
             | "float128"
             | "char"
             | "uchar"
+            | "str"
+            | "ustr"
             | "bool"
             | "void"
             | "type"
@@ -170,7 +172,7 @@ pub fn has_compile_operations(stmts: &[Stmt]) -> bool {
                     || then_block.iter().any(check_stmt)
                     || else_block
                         .as_ref()
-                        .map_or(false, |eb| eb.iter().any(check_stmt))
+                        .is_some_and(|eb| eb.iter().any(check_stmt))
             }
             Stmt::WhileStmt {
                 condition, body, ..
@@ -182,7 +184,7 @@ pub fn has_compile_operations(stmts: &[Stmt]) -> bool {
                     }
             }
             Stmt::LoopStmt { count, body } => {
-                count.as_ref().map_or(false, check_expr)
+                count.as_ref().is_some_and(check_expr)
                     || match body {
                         EitherBlock::Inline(stmts) => stmts.iter().any(check_stmt),
                         EitherBlock::External(e) => check_expr(e),
@@ -237,6 +239,7 @@ pub(crate) fn expr_contains_this(expr: &Expr) -> bool {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct Interpreter {
     pub env: InterpreterEnv,
     pub functions: HashMap<String, (Vec<BaseType>, Vec<Param>, Vec<Stmt>)>,
@@ -249,6 +252,12 @@ pub struct Interpreter {
     pub current_switch_type: Option<String>,
     pub current_type: Option<String>,
     pub target_backend: String,
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Interpreter {

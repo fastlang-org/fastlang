@@ -133,6 +133,7 @@ pub enum TokenKind {
     DotDot,      //..  //todo : add it
     DashDot,     // -.
     Mod,         // %
+    ModAssign,   // %=
     Underscore,  // _
 
     // logical
@@ -255,6 +256,7 @@ impl TokenKind {
             TokenKind::MulAssign => "*=",
             TokenKind::DivAssign => "/=",
             TokenKind::Mod => "%",
+            TokenKind::ModAssign => "%=",
             TokenKind::LBrace => "{",
             TokenKind::RBrace => "}",
             TokenKind::LBracket => "[",

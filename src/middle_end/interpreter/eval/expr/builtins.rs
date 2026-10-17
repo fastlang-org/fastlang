@@ -212,10 +212,8 @@ impl Interpreter {
                 }
             }
             Expr::BinaryOp { .. } => {
-                if let Ok(res) = self.eval_expr(&evaled) {
-                    if let Expr::LiteralString(s) = res {
-                        return s;
-                    }
+                if let Ok(Expr::LiteralString(s)) = self.eval_expr(&evaled) {
+                    return s;
                 }
                 "Compile-time Error".to_string()
             }
@@ -283,13 +281,15 @@ impl Interpreter {
                                 type_opt = Some(self.extract_type_or_name(value));
                             }
                         }
-                        Stmt::ReassignStmt { target, value, .. } => {
-                            if let Expr::Identifier(field_name) = target {
-                                if field_name == "name" {
-                                    name_opt = Some(self.extract_string_from_expr(value));
-                                } else if field_name == "ty" || field_name == "type" {
-                                    type_opt = Some(self.extract_type_or_name(value));
-                                }
+                        Stmt::ReassignStmt {
+                            target: Expr::Identifier(field_name),
+                            value,
+                            ..
+                        } => {
+                            if field_name == "name" {
+                                name_opt = Some(self.extract_string_from_expr(value));
+                            } else if field_name == "ty" || field_name == "type" {
+                                type_opt = Some(self.extract_type_or_name(value));
                             }
                         }
                         Stmt::ExpressionStmt(Expr::BinaryOp {
@@ -436,8 +436,7 @@ impl Interpreter {
             let inner = &iterable_type[6..iterable_type.len() - 1];
             return self.resolve_type_str(inner.trim());
         }
-        if iterable_type.ends_with("[]") {
-            let inner = &iterable_type[..iterable_type.len() - 2];
+        if let Some(inner) = iterable_type.strip_suffix("[]") {
             return self.resolve_type_str(inner.trim());
         }
         if iterable_type == "array" {
@@ -755,11 +754,10 @@ impl Interpreter {
             {
                 return Ok(None);
             }
-        } else if handle_name == "handle_access" {
-            if bp.handle_signatures.contains_key(prop_name) || bp.methods.contains_key(prop_name) {
+        } else if handle_name == "handle_access"
+            && (bp.handle_signatures.contains_key(prop_name) || bp.methods.contains_key(prop_name)) {
                 return Ok(None);
             }
-        }
 
         let sig = match bp.handle_signatures.get(handle_name) {
             Some(s) => s,

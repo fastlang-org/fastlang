@@ -205,7 +205,7 @@ impl Parser {
         }
         self.metadata.insert(name.clone(), meta);
 
-        return Ok(Decl::StructDecl {
+        Ok(Decl::StructDecl {
             visibility: Visibility::Private,
             name,
             handles: used_handles,
@@ -214,6 +214,6 @@ impl Parser {
             handle_block,
             static_block: static_block_ast,
             constructor,
-        });
+        })
     }
 }

@@ -154,6 +154,28 @@ impl Parser {
             return true;
         }
 
+        if self.tokens[idx].kind == TokenKind::LParen {
+            let mut p_depth = 0;
+            let mut p_idx = idx;
+            while p_idx < self.tokens.len() {
+                if self.tokens[p_idx].kind == TokenKind::LParen {
+                    p_depth += 1;
+                } else if self.tokens[p_idx].kind == TokenKind::RParen {
+                    p_depth -= 1;
+                    if p_depth == 0 {
+                        let next = self.tokens.get(p_idx + 1).map(|t| &t.kind);
+                        if matches!(next, Some(TokenKind::Assign) | Some(TokenKind::Arrow) | Some(TokenKind::Comma)) {
+                            return true;
+                        }
+                        break;
+                    }
+                } else if matches!(self.tokens[p_idx].kind, TokenKind::SemiColon | TokenKind::EOF) {
+                    break;
+                }
+                p_idx += 1;
+            }
+        }
+
         if self.tokens[idx].kind == TokenKind::Less {
             let mut depth = 0;
             while idx < self.tokens.len() {
@@ -178,6 +200,27 @@ impl Parser {
             }
             if matches!(&self.tokens[idx].kind, TokenKind::Identifier(_)) {
                 return true;
+            }
+            if self.tokens[idx].kind == TokenKind::LParen {
+                let mut p_depth = 0;
+                let mut p_idx = idx;
+                while p_idx < self.tokens.len() {
+                    if self.tokens[p_idx].kind == TokenKind::LParen {
+                        p_depth += 1;
+                    } else if self.tokens[p_idx].kind == TokenKind::RParen {
+                        p_depth -= 1;
+                        if p_depth == 0 {
+                            let next = self.tokens.get(p_idx + 1).map(|t| &t.kind);
+                            if matches!(next, Some(TokenKind::Assign) | Some(TokenKind::Arrow) | Some(TokenKind::Comma)) {
+                                return true;
+                            }
+                            break;
+                        }
+                    } else if matches!(self.tokens[p_idx].kind, TokenKind::SemiColon | TokenKind::EOF) {
+                        break;
+                    }
+                    p_idx += 1;
+                }
             }
         }
 

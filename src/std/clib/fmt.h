@@ -10,8 +10,21 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef NOGDI
+#define NOGDI
+#endif
+#ifndef NOUSER
+#define NOUSER
+#endif
 #include <winsock2.h>
 #include <windows.h>
+#undef NOGDI
+#undef NOUSER
+#undef CloseWindow
+#undef ShowCursor
+#undef LoadImage
+#undef DrawText
+#undef DrawTextEx
 #else
 #include <unistd.h>
 #endif
@@ -132,11 +145,6 @@ static inline void print_single_arg(const T &val)
     else if constexpr (has_display<Decayed>::value)
     {
         auto d = const_cast<Decayed &>(val).display();
-        print_single_arg(d);
-    }
-    else if constexpr (fastlang_has_as_str<Decayed>::value)
-    {
-        auto d = const_cast<Decayed &>(val).as_str();
         print_single_arg(d);
     }
     else if constexpr (std::is_pointer_v<Decayed>)

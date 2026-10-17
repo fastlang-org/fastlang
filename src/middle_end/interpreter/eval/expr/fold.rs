@@ -1,8 +1,8 @@
 use crate::frontend::parser::ast::*;
 use crate::middle_end::interpreter::env::InterpreterEnv;
 use crate::middle_end::interpreter::eval::is_literal;
-use crate::middle_end::interpreter::eval::substitute::substitute_expr;
 use crate::middle_end::interpreter::eval::strip_type_wrapper;
+use crate::middle_end::interpreter::eval::substitute::substitute_expr;
 use crate::middle_end::interpreter::intrinsics::CompilerIntrinsics;
 use crate::middle_end::interpreter::Interpreter;
 use crate::middle_end::semantic::analyzer::resolve_call_generics;
@@ -305,18 +305,18 @@ impl Interpreter {
                 if let Some(t_name) = obj_type_name {
                     let ft = self.get_fast_type(&t_name);
                     match property.as_str() {
-                        "is_primitive" => *expr = Expr::LiteralBool(ft.is_primitive()),
-                        "is_pointer" => *expr = Expr::LiteralBool(ft.is_pointer()),
-                        "is_array" => *expr = Expr::LiteralBool(ft.is_array()),
-                        "printable" | "is_printable" => *expr = Expr::LiteralBool(ft.printable()),
-                        "throwable" | "is_throwable" => *expr = Expr::LiteralBool(ft.throwable()),
-                        "shareable" | "is_shareable" => *expr = Expr::LiteralBool(ft.shareable()),
-                        "copyable" | "is_copyable" => *expr = Expr::LiteralBool(ft.copyable()),
-                        "castable" | "is_castable" => *expr = Expr::LiteralBool(ft.castable()),
-                        "is_constant" | "is_const" => *expr = Expr::LiteralBool(ft.is_constant()),
-                        "is_runtime" => *expr = Expr::LiteralBool(ft.is_runtime()),
-                        "is_comptime" => *expr = Expr::LiteralBool(ft.is_comptime()),
-                        "is_undefined" => *expr = Expr::LiteralBool(ft.is_undefined()),
+                        "primitive" => *expr = Expr::LiteralBool(ft.is_primitive()),
+                        "pointer" => *expr = Expr::LiteralBool(ft.is_pointer()),
+                        "array" => *expr = Expr::LiteralBool(ft.is_array()),
+                        "printable" => *expr = Expr::LiteralBool(ft.printable()),
+                        "throwable" => *expr = Expr::LiteralBool(ft.throwable()),
+                        "shareable" => *expr = Expr::LiteralBool(ft.shareable()),
+                        "copyable" => *expr = Expr::LiteralBool(ft.copyable()),
+                        "castable" => *expr = Expr::LiteralBool(ft.castable()),
+                        "constant" => *expr = Expr::LiteralBool(ft.is_constant()),
+                        "runtime" => *expr = Expr::LiteralBool(ft.is_runtime()),
+                        "comptime" => *expr = Expr::LiteralBool(ft.is_comptime()),
+                        "undefined" => *expr = Expr::LiteralBool(ft.is_undefined()),
                         "on_heap" => *expr = Expr::LiteralBool(ft.on_heap()),
                         "on_stack" => *expr = Expr::LiteralBool(ft.on_stack()),
                         "size" => *expr = Expr::LiteralInt(ft.size() as i128),
@@ -446,23 +446,23 @@ impl Interpreter {
                     if let Some(t_name) = obj_type_name {
                         let ft = self.get_fast_type(&t_name);
                         match property.as_str() {
-                            "printable" | "is_printable" => {
+                            "printable" => {
                                 *expr = Expr::LiteralBool(ft.printable());
                                 return Ok(());
                             }
-                            "throwable" | "is_throwable" => {
+                            "throwable" => {
                                 *expr = Expr::LiteralBool(ft.throwable());
                                 return Ok(());
                             }
-                            "shareable" | "is_shareable" => {
+                            "shareable" => {
                                 *expr = Expr::LiteralBool(ft.shareable());
                                 return Ok(());
                             }
-                            "copyable" | "is_copyable" => {
+                            "copyable" => {
                                 *expr = Expr::LiteralBool(ft.copyable());
                                 return Ok(());
                             }
-                            "castable" | "is_castable" => {
+                            "castable" => {
                                 *expr = Expr::LiteralBool(ft.castable());
                                 return Ok(());
                             }
@@ -476,31 +476,31 @@ impl Interpreter {
                                     return Ok(());
                                 }
                             }
-                            "is_primitive" => {
+                            "primitive"  => {
                                 *expr = Expr::LiteralBool(ft.is_primitive());
                                 return Ok(());
                             }
-                            "is_pointer" => {
+                            "pointer"  => {
                                 *expr = Expr::LiteralBool(ft.is_pointer());
                                 return Ok(());
                             }
-                            "is_array" => {
+                            "array"  => {
                                 *expr = Expr::LiteralBool(ft.is_array());
                                 return Ok(());
                             }
-                            "is_constant" | "is_const" => {
+                            "constant"  => {
                                 *expr = Expr::LiteralBool(ft.is_constant());
                                 return Ok(());
                             }
-                            "is_runtime" => {
+                            "runtime"  => {
                                 *expr = Expr::LiteralBool(ft.is_runtime());
                                 return Ok(());
                             }
-                            "is_comptime" => {
+                            "comptime"  => {
                                 *expr = Expr::LiteralBool(ft.is_comptime());
                                 return Ok(());
                             }
-                            "is_undefined" => {
+                            "undefined" => {
                                 *expr = Expr::LiteralBool(ft.is_undefined());
                                 return Ok(());
                             }
@@ -510,6 +510,10 @@ impl Interpreter {
                             }
                             "on_stack" => {
                                 *expr = Expr::LiteralBool(ft.on_stack());
+                                return Ok(());
+                            }
+                            "as_str" => {
+                                *expr = Expr::LiteralString(ft.as_str());
                                 return Ok(());
                             }
                             "has_handle" => {
@@ -751,7 +755,7 @@ impl Interpreter {
                         }
                     }
                     if let Some(chosen_fn) = selected_fn {
-                        *callee = Box::new(Expr::Identifier(chosen_fn.clone()));
+                        **callee = Expr::Identifier(chosen_fn.clone());
                         let is_chosen_compilable = chosen_fn.starts_with("@compile::") || {
                             if let Some((_, _, body)) = self.functions.get(&chosen_fn) {
                                 crate::middle_end::semantic::analyzer::detect_execution_mode(body)
@@ -957,4 +961,3 @@ impl Interpreter {
         Ok(())
     }
 }
-

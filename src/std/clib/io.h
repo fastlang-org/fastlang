@@ -11,9 +11,22 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef NOGDI
+#define NOGDI
+#endif
+#ifndef NOUSER
+#define NOUSER
+#endif
 #include <winsock2.h>
 #include <windows.h>
 #include <io.h>
+#undef NOGDI
+#undef NOUSER
+#undef CloseWindow
+#undef ShowCursor
+#undef LoadImage
+#undef DrawText
+#undef DrawTextEx
 #else
 #include <unistd.h>
 #endif
@@ -33,6 +46,8 @@ static inline void fastlang_enable_utf8_output(void)
 }
 #endif
 
+#ifndef FASTLANG_ALLOC_DEFINED
+#define FASTLANG_ALLOC_DEFINED
 static inline void* fast_alloc(size_t size)
 {
     void* ptr = malloc(size);
@@ -48,6 +63,7 @@ static inline void fast_free(void* ptr)
         free(ptr);
     }
 }
+#endif
 
 static inline int fast_open(const char* path, int flags, int mode)
 {

@@ -83,6 +83,7 @@ impl FastType {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_metadata(
         base_type: BaseType,
         has_display: bool,
@@ -114,6 +115,7 @@ impl FastType {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_full_metadata(
         base_type: BaseType,
         has_display: bool,
@@ -199,12 +201,11 @@ impl FastType {
             || ((clean == "throw" || clean == "$throw") && self.flags.contains(&Flag::Throwable))
             || (clean == "default" && self.flags.contains(&Flag::Defaultable))
             || (clean == "share" && self.flags.contains(&Flag::Shareable))
-            || (clean == "as_str" && (self.printable()))
     }
 
     pub fn has_method(&self, name: &str) -> bool {
         let clean = name.trim();
-        self.methods.iter().any(|m| m == clean) || (clean == "as_str" && (self.printable()))
+        self.methods.iter().any(|m| m == clean)
     }
 
     pub fn has_field(&self, name: &str) -> bool {

@@ -125,11 +125,12 @@ impl Interpreter {
         for _ in 0..10 {
             if let Some(ref env_rc) = self.current_env {
                 if let Some(info) = env_rc.borrow().lookup(&current) {
-                    if let SymbolKind::Variable { type_node, .. } = &info.kind {
-                        if let BaseType::Type(inner) = type_node {
-                            current = inner.as_str();
-                            continue;
-                        }
+                    if let SymbolKind::Variable {
+                        type_node: BaseType::Type(inner),
+                        ..
+                    } = &info.kind {
+                        current = inner.as_str();
+                        continue;
                     }
                 }
             }

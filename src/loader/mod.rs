@@ -36,6 +36,7 @@ pub struct ProjectLoader {
     pub packages_dir: Option<PathBuf>,
     pub global_libs: Vec<PathBuf>,
     pub manifest: Option<FastManifest>,
+    pub verbose: bool,
 }
 
 pub fn get_std_dirs() -> Vec<PathBuf> {
@@ -72,6 +73,12 @@ pub fn get_std_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+impl Default for ProjectLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProjectLoader {
     pub fn new() -> Self {
         let global_libs = GlobalConfig::load().get_resolved_paths();
@@ -92,6 +99,7 @@ impl ProjectLoader {
             packages_dir: None,
             global_libs,
             manifest: None,
+            verbose: false,
         }
     }
 
@@ -148,8 +156,7 @@ impl ProjectLoader {
         // 2. Standard library (std/...)
         let std_dirs = get_std_dirs();
         for ext in &extensions {
-            if mod_name.starts_with("std/") {
-                let sub = &mod_name[4..];
+            if let Some(sub) = mod_name.strip_prefix("std/") {
                 for s_dir in &std_dirs {
                     let test = s_dir.join(format!("{}{}", sub, ext));
                     if test.exists() {
@@ -247,7 +254,7 @@ impl ProjectLoader {
                 ..
             }) = stmt
             {
-                if abi.is_some() || module_path.first().map_or(false, |p| p.ends_with(".h") || p.ends_with(".hpp")) {
+                if abi.is_some() || module_path.first().is_some_and(|p| p.ends_with(".h") || p.ends_with(".hpp")) {
                     continue;
                 }
                 let mut path_clone = module_path.clone();
@@ -286,8 +293,7 @@ impl ProjectLoader {
         let extensions = [".fast", ".fs"];
         let std_dirs = get_std_dirs();
         for ext in &extensions {
-            if mod_name.starts_with("std/") {
-                let sub = &mod_name[4..];
+            if let Some(sub) = mod_name.strip_prefix("std/") {
                 for s_dir in &std_dirs {
                     let test = s_dir.join(format!("{}{}", sub, ext));
                     if test.exists() {
@@ -479,7 +485,9 @@ impl ProjectLoader {
                 continue;
             }
 
-            println!("Loading module {}...", mod_name);
+            if self.verbose {
+                println!("Loading module {}...", mod_name);
+            }
             let mod_ast = self.parse_file(&actual_path)?;
             merge_metadata(global_metadata, mod_ast.1);
 
@@ -507,7 +515,7 @@ impl ProjectLoader {
 
     fn parse_file(&mut self, path: &str) -> Result<(Vec<Stmt>, HashMap<String, TypeMetadata>), String> {
         let contents = std::fs::read_to_string(path)
-            .unwrap_or_else(|_| panic!("Could not read '{}'. Make sure the file exists.", path));
+            .map_err(|_| format!("Could not read '{}'. Make sure the file exists.", path))?;
 
         self.process_file_dependencies(&contents);
     
@@ -616,7 +624,7 @@ impl ProjectLoader {
                 };
 
                 if let Some(l) = line_opt {
-                    report_visual_error(&contents, l, col_opt.unwrap_or(1), &clean_msg);
+                    report_visual_error(&contents, path, l, col_opt.unwrap_or(1), &clean_msg);
                 } else {
                     eprintln!("\n\x1b[31;1merror:\x1b[0m {}\n", clean_msg);
                 }

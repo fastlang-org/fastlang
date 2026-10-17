@@ -78,7 +78,8 @@ public class list<T> -> {
       fn push(item: T) -> void {
         match (this.head) -> {
           None => {
-            this.head = Some(new node<T>(item));
+            mutRef<node<T>> new_node = new node<T>(item);
+            this.head = Some(new_node);
             this.length = this.length + 1;
           }
           Some(h) => {
@@ -179,7 +180,7 @@ public class list<T> -> {
       fn as_array() -> T[] {
         T arr[] = new T[this.length];
         for (usize i = 0; i < this.length; i++) -> {
-          arr[i] = this.pop();
+          arr[i] = this.pop().get();
         }
         return arr;
       }

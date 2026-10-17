@@ -3,6 +3,14 @@ use super::*;
 impl SemanticAnalyzer {
     pub(crate) fn visit_statement(&mut self, stmt: &Stmt) -> Result<(), String> {
         match stmt {
+            Stmt::Block(stmts) | Stmt::ThisBlock(stmts) => {
+                self.enter_scope();
+                for s in stmts {
+                    self.visit_statement(s)?;
+                }
+                self.leave_scope();
+            }
+
             Stmt::Declaration(decl) => {
                 self.visit_declaration(decl)?;
             }
@@ -45,7 +53,7 @@ impl SemanticAnalyzer {
                                 is_uninitialized: false,
                                 is_compilable: false,
                             };
-                            let _ = self
+                            self
                                 .current_env
                                 .borrow_mut()
                                 .define_or_update(var_name.clone(), info);
@@ -85,7 +93,7 @@ impl SemanticAnalyzer {
                                         is_uninitialized: false,
                                         is_compilable: false,
                                     };
-                                    let _ = self
+                                    self
                                         .current_env
                                         .borrow_mut()
                                         .define_or_update(name.clone(), info);
@@ -684,14 +692,13 @@ impl SemanticAnalyzer {
                                 name, type_str
                             ));
                         }
-                    } else if self.is_struct_or_blueprint_type(&type_str) && !is_pointer_or_ref {
-                        if !self.type_has_drop_handle(&type_str) {
+                    } else if self.is_struct_or_blueprint_type(&type_str) && !is_pointer_or_ref
+                        && !self.type_has_drop_handle(&type_str) {
                             return Err(format!(
                                 "Semantic Error: Cannot delete object '{}' of type '{}' because it does not implement a 'drop' handle.",
                                 name, type_str
                             ));
                         }
-                    }
 
                     // Mark as deleted and remove from active heap variables
                     self.memory.deleted_vars.insert(name.clone());
@@ -746,12 +753,11 @@ impl SemanticAnalyzer {
                         "Semantic Error: Return statement is not allowed in this scope. 'has_return' flag is not enabled.".to_string()
                     );
                 }
-                let actual_type;
-                if expr.is_none() {
-                    actual_type = "void".to_string();
+                let actual_type = if expr.is_none() {
+                    "void".to_string()
                 } else {
-                    actual_type = self.visit_expression(&expr.clone().unwrap())?;
-                }
+                    self.visit_expression(&expr.clone().unwrap())?
+                };
                 if let Some(expected_type) = &self.active_return_type.clone() {
                     let expected_str = expected_type.as_str();
                     let is_main = self.scope.current_context.as_deref() == Some("main");
@@ -1128,15 +1134,10 @@ impl SemanticAnalyzer {
             | Stmt::CaseStmt { .. } => true,
             Stmt::IfStmt {
                 then_block,
-                else_block,
+                else_block: Some(eb),
                 ..
-            } => {
-                if let Some(eb) = else_block {
-                    self.block_always_terminates(then_block) && self.block_always_terminates(eb)
-                } else {
-                    false
-                }
-            }
+            } => self.block_always_terminates(then_block) && self.block_always_terminates(eb),
+            Stmt::IfStmt { .. } => false,
             Stmt::TryCatchStmt {
                 try_block,
                 catches,
@@ -1154,21 +1155,18 @@ impl SemanticAnalyzer {
     }
 
     pub(crate) fn validate_match_pattern(expr: &Expr) -> Result<(), String> {
-        match expr {
-            Expr::BinaryOp {
+        if let Expr::BinaryOp {
                 left,
                 operator,
                 right,
-            } => {
-                if operator == "||" || operator == "or" {
-                    return Err(
-                        "Semantic Error: Use single pipe '|' for pattern alternation in match, '||' and 'or' are not allowed in match patterns.".to_string()
-                    );
-                }
-                Self::validate_match_pattern(left)?;
-                Self::validate_match_pattern(right)?;
+            } = expr {
+            if operator == "||" || operator == "or" {
+                return Err(
+                    "Semantic Error: Use single pipe '|' for pattern alternation in match, '||' and 'or' are not allowed in match patterns.".to_string()
+                );
             }
-            _ => {}
+            Self::validate_match_pattern(left)?;
+            Self::validate_match_pattern(right)?;
         }
         Ok(())
     }

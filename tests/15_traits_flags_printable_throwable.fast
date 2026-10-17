@@ -39,35 +39,35 @@ class ThrowData -> {
 
 fn test_primitive_traits() -> void {
     int32 num = 42;
-    bool is_prim = typeof(num).is_primitive;
+    bool is_prim = typeof(num).primitive();
     println("int32 is_primitive: ", is_prim); // EXPECT: int32 is_primitive: true
 
-    bool is_print = typeof(num).printable;
+    bool is_print = typeof(num).printable();
     println("int32 printable: ", is_print); // EXPECT: int32 printable: true
 
-    bool is_copy = typeof(num).copyable;
+    bool is_copy = typeof(num).copyable();
     println("int32 copyable: ", is_copy); // EXPECT: int32 copyable: true
 
-    bool is_throw = typeof(num).throwable;
+    bool is_throw = typeof(num).throwable();
     println("int32 throwable: ", is_throw); // EXPECT: int32 throwable: false
 }
 
 fn test_custom_traits() -> void {
     PlainData plain = new PlainData();
-    println("PlainData printable: ", typeof(plain).printable); // EXPECT: PlainData printable: false
-    println("PlainData copyable: ", typeof(plain).copyable); // EXPECT: PlainData copyable: false
-    println("PlainData throwable: ", typeof(plain).throwable); // EXPECT: PlainData throwable: false
+    println("PlainData printable: ", typeof(plain).printable()); // EXPECT: PlainData printable: false
+    println("PlainData copyable: ", typeof(plain).copyable()); // EXPECT: PlainData copyable: false
+    println("PlainData throwable: ", typeof(plain).throwable()); // EXPECT: PlainData throwable: false
 
     PrintableData print_obj = new PrintableData();
-    println("PrintableData printable: ", typeof(print_obj).printable); // EXPECT: PrintableData printable: true
-    println("PrintableData throwable: ", typeof(print_obj).throwable); // EXPECT: PrintableData throwable: false
+    println("PrintableData printable: ", typeof(print_obj).printable()); // EXPECT: PrintableData printable: true
+    println("PrintableData throwable: ", typeof(print_obj).throwable()); // EXPECT: PrintableData throwable: false
 
     ThrowData throw_obj = new ThrowData();
-    println("ThrowData throwable: ", typeof(throw_obj).throwable); // EXPECT: ThrowData throwable: true
-    println("ThrowData printable: ", typeof(throw_obj).printable); // EXPECT: ThrowData printable: false
+    println("ThrowData throwable: ", typeof(throw_obj).throwable()); // EXPECT: ThrowData throwable: true
+    println("ThrowData printable: ", typeof(throw_obj).printable()); // EXPECT: ThrowData printable: false
 
     CustomError err = new CustomError();
-    println("CustomError throwable: ", typeof(err).throwable); // EXPECT: CustomError throwable: true
+    println("CustomError throwable: ", typeof(err).throwable()); // EXPECT: CustomError throwable: true
 }
 
 fn test_default_values() -> void {
@@ -92,9 +92,9 @@ fn test_new_reflection() -> void {
     println("PrintableData has_field nonexistent: ", typeof(print_obj).has_field("nonexistent")); // EXPECT: PrintableData has_field nonexistent: false
 
     int32 num = 42;
-    println("int32 is_undefined: ", typeof(num).is_undefined); // EXPECT: int32 is_undefined: false
-    println("int32 is_runtime: ", typeof(num).is_runtime); // EXPECT: int32 is_runtime: false
-    println("int32 is_comptime: ", typeof(num).is_comptime); // EXPECT: int32 is_comptime: true
+    println("int32 is_undefined: ", typeof(num).undefined()); // EXPECT: int32 is_undefined: false
+    println("int32 is_runtime: ", typeof(num).runtime()); // EXPECT: int32 is_runtime: false
+    println("int32 is_comptime: ", typeof(num).comptime()); // EXPECT: int32 is_comptime: true
 }
 
 fn main() -> int32 {

@@ -90,7 +90,6 @@ impl Parser {
     /// Keywords that can legally appear as identifiers in name positions
     /// (variable names, field names, parameter names).
     /// e.g. `let bool flag = ...` where 'flag' is a keyword we registered.
-
     pub fn parse_program(&mut self) -> Result<Program, String> {
         let mut statements = Vec::new();
 
@@ -118,7 +117,7 @@ impl Parser {
             }
         }
         Ok(Program {
-            statements: statements,
+            statements,
         })
     }
 

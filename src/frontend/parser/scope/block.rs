@@ -365,8 +365,7 @@ impl Parser {
                             HandleMethods::Continue |
                             HandleMethods::Copy
                     )
-                {
-                    if !method_params.is_empty() {
+                    && !method_params.is_empty() {
                         return Err(
                             format!(
                                 "Syntax Error: Handle method '{}' cannot take any parameters at line {}, column {}",
@@ -376,7 +375,6 @@ impl Parser {
                             )
                         );
                     }
-                }
 
                 let default_ret: BaseType = if handle_kind == HandleMethods::Display {
                     BaseType::Str
@@ -502,7 +500,7 @@ impl Parser {
         }
         self.consume(TokenKind::RBrace, "Expected '}' to close constructor block")?;
         meta.constructor = Some(con_meta);
-        return Ok(Some(constructor_list));
+        Ok(Some(constructor_list))
     }
     pub(crate) fn parse_block(&mut self, _scope: String) -> Result<Vec<Stmt>, String> {
         let mut stmts: Vec<Stmt> = Vec::new();

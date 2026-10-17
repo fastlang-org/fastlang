@@ -124,7 +124,7 @@ impl CodeGenerator {
                 self.indent_level = old_indent;
                 struct_code.push_str(&captured);
                 struct_code.push_str(&format!(
-                    "{}}}; return std::make_shared<__Anon>(); }}())",
+                    "{}}}; return __Anon(); }}())",
                     "    ".repeat(self.indent_level)
                 ));
                 struct_code
@@ -136,7 +136,13 @@ impl CodeGenerator {
                     "{}".to_string()
                 }
             }
-            Expr::Identifier(name) => cpp_safe_name(name),
+            Expr::Identifier(name) => {
+                if name.starts_with('@') {
+                    format!("fastlang_string_create_from_ptr(\"{}\")", name)
+                } else {
+                    cpp_safe_name(name)
+                }
+            }
             Expr::This => {
                 if self.in_primitive_impl || self.in_machine {
                     "__this".to_string()
@@ -219,7 +225,7 @@ impl CodeGenerator {
                     if let Some(target) = self.match_primitive_target(left, "add") {
                         if target == "char" {
                             let rt = self.extract_cpp_type_from_expr(right);
-                            let is_array = rt.as_deref().map_or(false, |s| {
+                            let is_array = rt.as_deref().is_some_and(|s| {
                                 let resolved = self.resolve_alias(s);
                                 resolved == "array"
                                     || resolved.starts_with("array<")
@@ -444,7 +450,7 @@ impl CodeGenerator {
                                 || self.struct_field_types.contains_key(namespace)
                                 || self.is_known_namespace(namespace)
                                 || self.is_known_namespace(&effective_ns)
-                                || namespace.chars().next().map_or(false, |c| c.is_uppercase())
+                                || namespace.chars().next().is_some_and(|c| c.is_uppercase())
                             {
                                 format!("{}::{}", effective_ns, clean_prop)
                             } else {
@@ -678,7 +684,7 @@ impl CodeGenerator {
                         || self.struct_field_types.contains_key(namespace)
                         || self.is_known_namespace(namespace)
                         || self.is_known_namespace(&effective_ns)
-                        || namespace.chars().next().map_or(false, |c| c.is_uppercase())
+                        || namespace.chars().next().is_some_and(|c| c.is_uppercase())
                     {
                         format!("{}::{}", effective_ns, clean_prop)
                     } else {

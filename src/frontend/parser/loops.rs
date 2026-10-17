@@ -179,7 +179,8 @@ impl Parser {
                 op == TokenKind::PlusAssign ||
                 op == TokenKind::MinusAssign ||
                 op == TokenKind::MulAssign ||
-                op == TokenKind::DivAssign
+                op == TokenKind::DivAssign ||
+                op == TokenKind::ModAssign
             {
                 self.advance(); // consume the assignment operator
                 let value = self.parse_expression()?;

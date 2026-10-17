@@ -1,19 +1,31 @@
 // Comprehensive Suite 09: Scopes, State Machines, Labels, Goto, and Lifecycle Handles
 import std::fmt;
+import std::error;
 
 machine CounterMachine -> {
     @init -> {
-        int32 count = 0;
-        int32 max_limit = 5;
-        goto -> @step;
+        this {
+            int32 count = 0;
+            int32 max_limit = 5;
+        }
+        int32 init_local = 100; // strictly local variable to @init
+        goto -> @step1;
     } [1];
 
-    @step -> {
-        count = count + 1;
-        if (count >= max_limit) {
+    @step1 -> {
+        this.count = this.count + 1;
+        if (this.count >= this.max_limit) {
             goto -> @finish;
         }
-        goto -> @step;
+        goto -> @step1;
+    } [2]; // limit set to 2 so it breaches and triggers error handler
+
+    @step2 -> {
+        this.count = this.count + 1;
+        if (this.count >= this.max_limit) {
+            goto -> @finish;
+        }
+        goto -> @step2;
     } [];
 
     @finish -> {
@@ -26,6 +38,39 @@ machine CounterMachine -> {
         }
         fn leave() -> int32 {
             return this.count;
+        }
+        fn error(e: labelLimitError) -> int32 {
+            println("Handled limit error on label: ", e.labelname);
+            if (e.labelname == @step1) {
+                goto -> @step2;
+            } else {
+                goto -> @finish;
+            }
+        }
+    }
+}
+
+// State Machine testing label named after a foreign scope (@cpp)
+machine ForeignLabelMachine -> {
+    @start -> {
+        goto -> @cpp;
+    } [1];
+
+    @cpp -> {
+        println("Foreign scope label @cpp executed safely!");
+        goto -> @done;
+    } [1];
+
+    @done -> {
+        leave;
+    } [1];
+
+    handle -> {
+        fn call() -> int32 {
+            goto -> @start;
+        }
+        fn leave() -> int32 {
+            return 1;
         }
     }
 }
@@ -44,7 +89,7 @@ machine StepperMachine -> {
 
     @third -> {
         println("ERROR: Should not reach @third!");
-        goto @done;
+        goto -> @done;
     } [1];
 
     @done -> {
@@ -53,7 +98,7 @@ machine StepperMachine -> {
 
     handle -> {
         fn call() -> int32 {
-            goto @first;
+            goto -> @first;
         }
         fn leave() -> int32 {
             println("Implicit leave executed cleanly");
@@ -62,41 +107,18 @@ machine StepperMachine -> {
     }
 }
 
-// State Machine with error handle catching limit breach
-machine BoundedErrorMachine -> {
-    @start -> {
-        goto -> @loop;
-    } [1];
-
-    @loop -> {
-        goto -> @loop;
-    } [2];
-
-    handle -> {
-        fn call() -> int32 {
-            goto -> @start;
-        }
-        fn error(e: Error) -> int32 {
-            println("Caught limit breach error successfully: ", e.message);
-            return 99;
-        }
-        fn leave() -> int32 {
-            return 0;
-        }
-    }
-}
-
 fn main() -> int32 {
     int32 result = CounterMachine();
     println("Final Machine Count: ", result); // EXPECT: Final Machine Count: 5
 
+    int32 foreign_res = ForeignLabelMachine();
+    println("Foreign Label Machine Result: ", foreign_res); // EXPECT: Foreign Label Machine Result: 1
+
     int32 step_res = StepperMachine();
     println("Stepper Machine Result: ", step_res); // EXPECT: Stepper Machine Result: 42
-
-    int32 err_res = BoundedErrorMachine();
-    println("Bounded Error Machine Handled Result: ", err_res); // EXPECT: Bounded Error Machine Handled Result: 99
 
     println("ALL 09_SCOPES TESTS PASSED"); // EXPECT: ALL 09_SCOPES TESTS PASSED
     return 0;
 }
+
 

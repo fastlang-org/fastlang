@@ -35,17 +35,14 @@ impl Size {
     }
 }
 #[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Default)]
 pub enum ExecutionMode {
+    #[default]
     Runtime,
     FullyCompilable,
     CompileRuntimeMix,
 }
 
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        Self::Runtime
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BaseType {
@@ -389,10 +386,10 @@ impl BaseType {
             } => {
                 let p_strs: Vec<String> = params.iter().map(|p| p.as_str()).collect();
                 if name.clone().is_none() {
-                    format!("Lambda<({}), {}>", p_strs.join(", "), return_type.as_str())
+                    format!("lambda<({}), {}>", p_strs.join(", "), return_type.as_str())
                 } else {
                     format!(
-                        "Lambda::{}<({}), {}>",
+                        "lambda::{}<({}), {}>",
                         name.as_ref().unwrap().as_str(),
                         p_strs.join(", "),
                         return_type.as_str()
@@ -457,6 +454,7 @@ impl BaseType {
             BaseType::New(t) => format!("new<{}>", t),
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "int8" => BaseType::Int(Size::S8),
@@ -493,44 +491,114 @@ impl BaseType {
             "auto" => BaseType::Auto,
             "object" => BaseType::Object,
             "number" | "num" => BaseType::Number,
+            "array" => BaseType::Array {
+                base_type: Box::new(BaseType::Unknown),
+                size: Box::new(None),
+            },
             "function" => BaseType::Function {
                 name: None,
                 params: vec![],
                 return_type: Box::new(BaseType::Unknown),
             },
             _ => {
-                if let Some(inner) = s.strip_prefix("blueprint::") {
-                    let clean = inner.strip_suffix('>').unwrap_or(inner);
-                    BaseType::Blueprint {
-                        name: clean.to_string(),
-                        fields: Box::new(std::collections::HashMap::new()),
-                        methods: Box::new(std::collections::HashMap::new()),
-                        generics: vec![],
+                if let Some(stripped) = s.strip_suffix('*') {
+                    BaseType::RawPointer(Box::new(BaseType::from_str(stripped)))
+                } else if let Some(stripped) = s.strip_suffix('&') {
+                    BaseType::Address(Box::new(BaseType::from_str(stripped)))
+                } else if let Some(stripped) = s.strip_prefix('&') {
+                    BaseType::Address(Box::new(BaseType::from_str(stripped)))
+                } else if s.ends_with(']') && s.contains('[') {
+                    let open = s.rfind('[').unwrap();
+                    let inner_type = &s[..open];
+                    let size_str = &s[open + 1..s.len() - 1];
+                    let size_expr = if size_str.is_empty() {
+                        None
+                    } else if let Ok(val) = size_str.parse::<i128>() {
+                        Some(Expr::LiteralInt(val))
+                    } else {
+                        None
+                    };
+                    BaseType::Array {
+                        base_type: Box::new(BaseType::from_str(inner_type)),
+                        size: Box::new(size_expr),
+                    }
+                } else if let Some(inner) = s.strip_prefix("blueprint::") {
+                    if let (Some(idx), true) = (inner.find('<'), inner.ends_with('>')) {
+                        let name = &inner[..idx];
+                        let g_inner = &inner[idx + 1..inner.len() - 1];
+                        let generics = g_inner.split(',').map(|p| BaseType::from_str(p.trim())).collect();
+                        BaseType::Blueprint {
+                            name: name.to_string(),
+                            fields: Box::new(std::collections::HashMap::new()),
+                            methods: Box::new(std::collections::HashMap::new()),
+                            generics,
+                        }
+                    } else {
+                        BaseType::Blueprint {
+                            name: inner.to_string(),
+                            fields: Box::new(std::collections::HashMap::new()),
+                            methods: Box::new(std::collections::HashMap::new()),
+                            generics: vec![],
+                        }
                     }
                 } else if let Some(inner) = s.strip_prefix("class::") {
-                    let clean = inner.strip_suffix('>').unwrap_or(inner);
-                    BaseType::Class {
-                        name: clean.to_string(),
-                        fields: Box::new(std::collections::HashMap::new()),
-                        methods: Box::new(std::collections::HashMap::new()),
-                        constructor: None,
-                        generics: vec![],
+                    if let (Some(idx), true) = (inner.find('<'), inner.ends_with('>')) {
+                        let name = &inner[..idx];
+                        let g_inner = &inner[idx + 1..inner.len() - 1];
+                        let generics = g_inner.split(',').map(|p| BaseType::from_str(p.trim())).collect();
+                        BaseType::Class {
+                            name: name.to_string(),
+                            fields: Box::new(std::collections::HashMap::new()),
+                            methods: Box::new(std::collections::HashMap::new()),
+                            constructor: None,
+                            generics,
+                        }
+                    } else {
+                        BaseType::Class {
+                            name: inner.to_string(),
+                            fields: Box::new(std::collections::HashMap::new()),
+                            methods: Box::new(std::collections::HashMap::new()),
+                            constructor: None,
+                            generics: vec![],
+                        }
                     }
                 } else if let Some(inner) = s.strip_prefix("struct::") {
-                    let clean = inner.strip_suffix('>').unwrap_or(inner);
-                    BaseType::Struct {
-                        name: clean.to_string(),
-                        fields: Box::new(std::collections::HashMap::new()),
-                        methods: Box::new(std::collections::HashMap::new()),
-                        generics: vec![],
+                    if let (Some(idx), true) = (inner.find('<'), inner.ends_with('>')) {
+                        let name = &inner[..idx];
+                        let g_inner = &inner[idx + 1..inner.len() - 1];
+                        let generics = g_inner.split(',').map(|p| BaseType::from_str(p.trim())).collect();
+                        BaseType::Struct {
+                            name: name.to_string(),
+                            fields: Box::new(std::collections::HashMap::new()),
+                            methods: Box::new(std::collections::HashMap::new()),
+                            generics,
+                        }
+                    } else {
+                        BaseType::Struct {
+                            name: inner.to_string(),
+                            fields: Box::new(std::collections::HashMap::new()),
+                            methods: Box::new(std::collections::HashMap::new()),
+                            generics: vec![],
+                        }
                     }
                 } else if let Some(inner) = s.strip_prefix("enum::") {
-                    let clean = inner.strip_suffix('>').unwrap_or(inner);
-                    BaseType::Enum {
-                        name: clean.to_string(),
-                        variants: vec![],
-                        methods: Box::new(std::collections::HashMap::new()),
-                        generics: vec![],
+                    if let (Some(idx), true) = (inner.find('<'), inner.ends_with('>')) {
+                        let name = &inner[..idx];
+                        let g_inner = &inner[idx + 1..inner.len() - 1];
+                        let generics = g_inner.split(',').map(|p| BaseType::from_str(p.trim())).collect();
+                        BaseType::Enum {
+                            name: name.to_string(),
+                            variants: vec![],
+                            methods: Box::new(std::collections::HashMap::new()),
+                            generics,
+                        }
+                    } else {
+                        BaseType::Enum {
+                            name: inner.to_string(),
+                            variants: vec![],
+                            methods: Box::new(std::collections::HashMap::new()),
+                            generics: vec![],
+                        }
                     }
                 } else if s.starts_with("struct<") && s.ends_with('>') {
                     let inner = &s[7..s.len() - 1];
@@ -557,18 +625,19 @@ impl BaseType {
                         methods: Box::new(std::collections::HashMap::new()),
                         generics: vec![],
                     }
-                } else if s.starts_with('&') {
-                    BaseType::Address(Box::new(BaseType::from_str(&s[1..])))
-                } else if s.ends_with('*') {
-                    BaseType::RawPointer(Box::new(BaseType::from_str(&s[..s.len() - 1])))
-                } else if s.ends_with('&') {
-                    BaseType::Address(Box::new(BaseType::from_str(&s[..s.len() - 1])))
-                } else if s.ends_with("[]") {
-                    BaseType::Array {
-                        base_type: Box::new(BaseType::from_str(&s[..s.len() - 2])),
-                        size: Box::new(None),
-                    }
-                } else if s.starts_with("fn(") || s.starts_with("Fn<(") || s.starts_with("fn<(") {
+                } else if s.starts_with("fn(")
+                    || s.starts_with("Fn<(")
+                    || s.starts_with("fn<(")
+                    || s.starts_with("lambda<(")
+                    || s.starts_with("Lambda<(")
+                    || s.starts_with("method<(")
+                    || s.starts_with("Method<(")
+                    || s.starts_with("micro<(")
+                    || s.starts_with("Micro<(")
+                {
+                    let is_method = s.starts_with("method<(") || s.starts_with("Method<(");
+                    let is_micro = s.starts_with("micro<(") || s.starts_with("Micro<(");
+                    let is_lambda = s.starts_with("lambda<(") || s.starts_with("Lambda<(");
                     let (params_str, ret_str) = if s.starts_with("fn(") {
                         let rp = s.rfind(')');
                         let (p, r) = if let Some(idx) = rp {
@@ -591,7 +660,11 @@ impl BaseType {
                         };
                         if let Some(rp) = inner.find(')') {
                             let p = &inner[1..rp];
-                            let rest = inner[rp + 1..].trim().trim_start_matches(',').trim();
+                            let rest = inner[rp + 1..]
+                                .trim()
+                                .trim_start_matches(',')
+                                .trim_start_matches("->")
+                                .trim();
                             (p, rest)
                         } else {
                             ("", "void")
@@ -603,11 +676,33 @@ impl BaseType {
                             params.push(BaseType::from_str(p.trim()));
                         }
                     }
-                    BaseType::Fn {
-                        name: None,
-                        params,
-                        return_type: Box::new(BaseType::from_str(ret_str)),
-                        mode: ExecutionMode::Runtime,
+                    if is_method {
+                        BaseType::Method {
+                            name: None,
+                            params,
+                            return_type: Box::new(BaseType::from_str(ret_str)),
+                            mode: ExecutionMode::Runtime,
+                        }
+                    } else if is_micro {
+                        BaseType::Micro {
+                            name: None,
+                            params,
+                            return_type: Box::new(BaseType::from_str(ret_str)),
+                            mode: ExecutionMode::Runtime,
+                        }
+                    } else if is_lambda {
+                        BaseType::Lambda {
+                            name: None,
+                            params,
+                            return_type: Box::new(BaseType::from_str(ret_str)),
+                        }
+                    } else {
+                        BaseType::Fn {
+                            name: None,
+                            params,
+                            return_type: Box::new(BaseType::from_str(ret_str)),
+                            mode: ExecutionMode::Runtime,
+                        }
                     }
                 } else if s.contains('<') && s.ends_with('>') {
                     let open_idx = s.find('<').unwrap();
@@ -617,10 +712,27 @@ impl BaseType {
                         .split(',')
                         .map(|p| BaseType::from_str(p.trim()))
                         .collect();
-                    if base == "array" && gen_parts.len() == 1 {
-                        BaseType::Array {
-                            base_type: Box::new(gen_parts.into_iter().next().unwrap()),
-                            size: Box::new(None),
+                    if base == "array" {
+                        if inner.ends_with(']') && inner.contains('[') {
+                            let open = inner.rfind('[').unwrap();
+                            let inner_type = &inner[..open];
+                            let size_str = &inner[open + 1..inner.len() - 1];
+                            let size_expr = if size_str.is_empty() {
+                                None
+                            } else if let Ok(val) = size_str.parse::<i128>() {
+                                Some(Expr::LiteralInt(val))
+                            } else {
+                                Some(Expr::Identifier(size_str.to_string()))
+                            };
+                            BaseType::Array {
+                                base_type: Box::new(BaseType::from_str(inner_type)),
+                                size: Box::new(size_expr),
+                            }
+                        } else {
+                            BaseType::Array {
+                                base_type: Box::new(BaseType::from_str(inner)),
+                                size: Box::new(None),
+                            }
                         }
                     } else {
                         BaseType::Blueprint {
@@ -633,7 +745,7 @@ impl BaseType {
                 } else if !s.is_empty()
                     && s.chars()
                         .next()
-                        .map_or(false, |c| c.is_alphabetic() || c == '_')
+                        .is_some_and(|c| c.is_alphabetic() || c == '_')
                 {
                     BaseType::Blueprint {
                         name: s.to_string(),
@@ -645,6 +757,38 @@ impl BaseType {
                     BaseType::Unknown
                 }
             }
+        }
+    }
+
+    pub fn from_impl_target(target: &str, target_generics: &[BaseType]) -> Self {
+        if target == "array" {
+            BaseType::Array {
+                base_type: Box::new(
+                    target_generics
+                        .first()
+                        .cloned()
+                        .unwrap_or(BaseType::Unknown),
+                ),
+                size: Box::new(None),
+            }
+        } else if let Some(stripped) = target.strip_suffix('*') {
+            BaseType::RawPointer(Box::new(BaseType::from_str(stripped)))
+        } else if let Some(stripped) = target.strip_suffix('&') {
+            BaseType::Address(Box::new(BaseType::from_str(stripped)))
+        } else {
+            let mut base = BaseType::from_str(target);
+            if !target_generics.is_empty() {
+                match &mut base {
+                    BaseType::Blueprint { generics, .. }
+                    | BaseType::Class { generics, .. }
+                    | BaseType::Struct { generics, .. }
+                    | BaseType::Enum { generics, .. } => {
+                        *generics = target_generics.to_vec();
+                    }
+                    _ => {}
+                }
+            }
+            base
         }
     }
 
@@ -773,7 +917,7 @@ impl BaseType {
     ) -> BaseType {
         match self {
             BaseType::GenericParam(name) => {
-                if let Some(concrete) = map.get(name) {
+                if let Some(concrete) = map.get(name).or_else(|| map.get(&format!("blueprint::{}", name))) {
                     concrete.clone()
                 } else {
                     BaseType::GenericParam(name.clone())
@@ -890,15 +1034,19 @@ impl BaseType {
                 methods,
                 generics,
             } => {
-                let substituted_generics = generics
-                    .iter()
-                    .map(|g| g.substitute_generics(map))
-                    .collect();
-                BaseType::Blueprint {
-                    name: name.clone(),
-                    fields: fields.clone(),
-                    methods: methods.clone(),
-                    generics: substituted_generics,
+                if let Some(concrete) = map.get(name).or_else(|| map.get(&format!("blueprint::{}", name))) {
+                    concrete.clone()
+                } else {
+                    let substituted_generics = generics
+                        .iter()
+                        .map(|g| g.substitute_generics(map))
+                        .collect();
+                    BaseType::Blueprint {
+                        name: name.clone(),
+                        fields: fields.clone(),
+                        methods: methods.clone(),
+                        generics: substituted_generics,
+                    }
                 }
             }
             _ => self.clone(),
@@ -909,6 +1057,23 @@ impl BaseType {
         let mut res = Vec::new();
         match self {
             BaseType::GenericParam(name) => res.push(name.clone()),
+            BaseType::Class { generics, .. }
+            | BaseType::Struct { generics, .. }
+            | BaseType::Enum { generics, .. } => {
+                for g in generics {
+                    let g_name = g.type_name().map(|s| s.to_string()).unwrap_or_else(|| g.as_str());
+                    res.push(g_name);
+                }
+            }
+            BaseType::Blueprint { name, generics, .. } => {
+                if generics.is_empty() {
+                    res.push(name.clone());
+                } else {
+                    for g in generics {
+                        res.extend(g.extract_generic_params());
+                    }
+                }
+            }
             BaseType::Type(inner) => res.extend(inner.extract_generic_params()),
             BaseType::Array { base_type, .. } => res.extend(base_type.extract_generic_params()),
             BaseType::Generic(vec) => {
@@ -1055,15 +1220,16 @@ pub enum Flag {
 }
 
 impl Flag {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
-            "compilable" | "is_compilable" => Flag::Compilable,
-            "printable" | "is_printable" => Flag::Printable,
-            "throwable" | "is_throwable" => Flag::Throwable,
-            "shareable" | "is_shareable" => Flag::Shareable,
-            "copyable" | "is_copyable" => Flag::Copyable,
-            "castable" | "is_castable" => Flag::Castable,
-            "defaultable" | "is_defaultable" => Flag::Defaultable,
+            "compilable" => Flag::Compilable,
+            "printable" => Flag::Printable,
+            "throwable" => Flag::Throwable,
+            "shareable" => Flag::Shareable,
+            "copyable" => Flag::Copyable,
+            "castable" => Flag::Castable,
+            "defaultable" => Flag::Defaultable,
             "has_return" => Flag::HasReturn,
             "has_yield" => Flag::HasYield,
             "has_break" => Flag::HasBreak,
@@ -1132,6 +1298,7 @@ pub enum ScopeSection {
 pub type Setting = ScopeSection;
 
 impl ScopeSection {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "constructor" | "init" => ScopeSection::Constructor,
@@ -1263,13 +1430,14 @@ impl HandleMethods {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "index_access" => HandleMethods::IndexAccess,
             "property_access" => HandleMethods::PropertyAccess,
             "namespace_access" => HandleMethods::NamespaceAccess,
             "handle_access" | "dash_dot" => HandleMethods::HandleAccess,
-            "display" => HandleMethods::Display,
+            "display" | "$display" => HandleMethods::Display,
             "add" => HandleMethods::Add,
             "increment" => HandleMethods::Increment,
             "decrement" => HandleMethods::Decrement,
@@ -1290,7 +1458,7 @@ impl HandleMethods {
             "arrow_assign" => HandleMethods::ArrowAssign,
             "fat_arrow" => HandleMethods::FatArrow,
             "equal_assign" => HandleMethods::EqualAssign,
-            "equal" | "assign" => HandleMethods::Equal,
+            "equal" => HandleMethods::Equal,
             "partial_equal" => HandleMethods::PartialEqual,
             "not_equal" => HandleMethods::NotEqual,
             "greater_than" => HandleMethods::GreaterThan,
@@ -1536,7 +1704,7 @@ impl Expr {
             }
             Expr::Spread(operand) => format!("...{}", operand.as_str()),
             Expr::ObjectLiteral(_stmts) => "unimplemented".to_string(),
-            Expr::Identifier(name) => format!("{}", name),
+            Expr::Identifier(name) => name.to_string(),
             Expr::This => "this".to_string(),
             Expr::Super => "super".to_string(), // will be handled in PropertyAccess
             Expr::Global => "global".to_string(),

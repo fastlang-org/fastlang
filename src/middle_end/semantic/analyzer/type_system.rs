@@ -24,6 +24,87 @@ impl SemanticAnalyzer {
         }
     }
 
+    pub(crate) fn is_known_type(&self, type_node: &BaseType) -> bool {
+        match type_node {
+            BaseType::Int(_)
+            | BaseType::UInt(_)
+            | BaseType::USize
+            | BaseType::ISize
+            | BaseType::Float(_)
+            | BaseType::Bool
+            | BaseType::Char
+            | BaseType::UChar
+            | BaseType::Str
+            | BaseType::UStr
+            | BaseType::Void
+            | BaseType::Auto
+            | BaseType::Number
+            | BaseType::Unknown
+            | BaseType::GenericParam(_) => true,
+            BaseType::Array { base_type, .. } => self.is_known_type(base_type),
+            BaseType::RawPointer(inner) | BaseType::Address(inner) => self.is_known_type(inner),
+            BaseType::Fn { return_type, params, .. }
+            | BaseType::Lambda { return_type, params, .. }
+            | BaseType::Method { return_type, params, .. }
+            | BaseType::Function { return_type, params, .. }
+            | BaseType::Micro { return_type, params, .. }
+            | BaseType::Macro { return_type, params, .. } => {
+                self.is_known_type(return_type) && params.iter().all(|p| self.is_known_type(p))
+            }
+            _ => {
+                let s = type_node.as_str();
+                let clean = BaseType::from_str(&s)
+                    .blueprint_name()
+                    .map(|b| b.to_string())
+                    .unwrap_or_else(|| s.clone());
+                let base_name = clean.split('<').next().unwrap_or(&clean).trim();
+                let base_name = base_name.trim_end_matches('*').trim_end_matches('&').trim();
+
+                if self.is_primitive_stack_type(base_name) || self.is_generic_type(base_name) {
+                    return true;
+                }
+                if self.current_env.borrow().lookup_blueprint(base_name).is_some() {
+                    return true;
+                }
+                if self.global_metadata.contains_key(base_name) {
+                    return true;
+                }
+                if let Some(info) = self.current_env.borrow().lookup(base_name) {
+                    if let SymbolKind::Variable { type_node, .. } = &info.kind {
+                        if matches!(type_node, BaseType::Type(_)) {
+                            return true;
+                        }
+                    }
+                }
+                let std_qual = format!("std::{}", base_name);
+                if self.global_metadata.contains_key(&std_qual)
+                    || self.current_env.borrow().lookup_blueprint(&std_qual).is_some()
+                {
+                    return true;
+                }
+                let types_qual = format!("std/types::{}", base_name);
+                if self.global_metadata.contains_key(&types_qual)
+                    || self.current_env.borrow().lookup_blueprint(&types_qual).is_some()
+                {
+                    return true;
+                }
+                let coll_qual = format!("std/collections::{}", base_name);
+                if self.global_metadata.contains_key(&coll_qual)
+                    || self.current_env.borrow().lookup_blueprint(&coll_qual).is_some()
+                {
+                    return true;
+                }
+                let err_qual = format!("std/error::{}", base_name);
+                if self.global_metadata.contains_key(&err_qual)
+                    || self.current_env.borrow().lookup_blueprint(&err_qual).is_some()
+                {
+                    return true;
+                }
+                false
+            }
+        }
+    }
+
     pub(crate) fn is_primitive_stack_type(&self, type_name: &str) -> bool {
         matches!(
             type_name,
@@ -135,7 +216,11 @@ impl SemanticAnalyzer {
         false
     }
 
-    pub(crate) fn types_are_compatible_basetype(&self, expected: &BaseType, actual: &BaseType) -> bool {
+    pub(crate) fn types_are_compatible_basetype(
+        &self,
+        expected: &BaseType,
+        actual: &BaseType,
+    ) -> bool {
         let res_exp = self.resolve_type(expected);
         let res_act = self.resolve_type(actual);
         let expected = &res_exp;
@@ -146,7 +231,9 @@ impl SemanticAnalyzer {
         }
 
         // Generic type handling (e.g. T, U, or GenericParam)
-        if matches!(expected, BaseType::GenericParam(_)) || matches!(actual, BaseType::GenericParam(_)) {
+        if matches!(expected, BaseType::GenericParam(_))
+            || matches!(actual, BaseType::GenericParam(_))
+        {
             return true;
         }
         if let Some(n) = expected.type_name() {
@@ -235,7 +322,10 @@ impl SemanticAnalyzer {
 
         // Type expressions: Type(T) accepts Type, Int, UInt, Bool, Float
         if let BaseType::Type(_) = expected {
-            if matches!(actual, BaseType::Type(_)) || actual.is_numeric() || matches!(actual, BaseType::Bool) {
+            if matches!(actual, BaseType::Type(_))
+                || actual.is_numeric()
+                || matches!(actual, BaseType::Bool)
+            {
                 return true;
             }
         }
@@ -246,24 +336,41 @@ impl SemanticAnalyzer {
         }
 
         // Array compatibility
-        if let (BaseType::Array { base_type: exp_inner, .. }, BaseType::Array { base_type: act_inner, .. }) = (expected, actual) {
+        if let (
+            BaseType::Array {
+                base_type: exp_inner,
+                ..
+            },
+            BaseType::Array {
+                base_type: act_inner,
+                ..
+            },
+        ) = (expected, actual)
+        {
             return self.types_are_compatible_basetype(exp_inner, act_inner);
         }
 
         // str and ustr compatibility
-        if matches!((expected, actual), (BaseType::Str, BaseType::Str) | (BaseType::UStr, BaseType::UStr)) {
+        if matches!(
+            (expected, actual),
+            (BaseType::Str, BaseType::Str) | (BaseType::UStr, BaseType::UStr)
+        ) {
             return true;
         }
-        if matches!((expected, actual), (BaseType::Str, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::Char) {
+        if matches!((expected, actual), (BaseType::Str, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::Char)
+        {
             return true;
         }
-        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::Str) if **base_type == BaseType::Char) {
+        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::Str) if **base_type == BaseType::Char)
+        {
             return true;
         }
-        if matches!((expected, actual), (BaseType::UStr, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::UChar) {
+        if matches!((expected, actual), (BaseType::UStr, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::UChar)
+        {
             return true;
         }
-        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::UStr) if **base_type == BaseType::UChar) {
+        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::UStr) if **base_type == BaseType::UChar)
+        {
             return true;
         }
 
@@ -289,16 +396,64 @@ impl SemanticAnalyzer {
             if matches!(**exp_inner, BaseType::Unknown) {
                 return true;
             }
-            let act_target = match actual {
+            let mut act_target = match actual {
                 BaseType::RawPointer(inner) => inner.as_ref(),
                 BaseType::Array { base_type, .. } => base_type.as_ref(),
                 BaseType::Address(inner) => inner.as_ref(),
                 other => other,
             };
+            while let BaseType::Array { base_type, .. } = act_target {
+                act_target = base_type.as_ref();
+            }
             return self.types_are_compatible_basetype(exp_inner, act_target);
         }
         if let BaseType::RawPointer(act_inner) = actual {
             return self.types_are_compatible_basetype(expected, act_inner);
+        }
+
+        // Lambda and Function compatibility
+        if let (
+            BaseType::Fn {
+                params: exp_p,
+                return_type: exp_r,
+                ..
+            }
+            | BaseType::Lambda {
+                params: exp_p,
+                return_type: exp_r,
+                ..
+            }
+            | BaseType::Method {
+                params: exp_p,
+                return_type: exp_r,
+                ..
+            },
+            BaseType::Fn {
+                params: act_p,
+                return_type: act_r,
+                ..
+            }
+            | BaseType::Lambda {
+                params: act_p,
+                return_type: act_r,
+                ..
+            }
+            | BaseType::Method {
+                params: act_p,
+                return_type: act_r,
+                ..
+            },
+        ) = (expected, actual)
+        {
+            if exp_p.len() != act_p.len() {
+                return false;
+            }
+            let params_compat = exp_p
+                .iter()
+                .zip(act_p.iter())
+                .all(|(p1, p2)| self.types_are_compatible_basetype(p1, p2));
+            let ret_compat = self.types_are_compatible_basetype(exp_r, act_r);
+            return params_compat && ret_compat;
         }
 
         // Generic param checks
@@ -314,9 +469,16 @@ impl SemanticAnalyzer {
         let act_name = actual.type_name();
 
         if let Some(exp_n) = exp_name {
-            if let Some(bp) = self.current_env.borrow().lookup_blueprint(exp_n).or_else(|| {
-                self.global_metadata.get(exp_n).map(build_blueprint_from_metadata)
-            }) {
+            if let Some(bp) = self
+                .current_env
+                .borrow()
+                .lookup_blueprint(exp_n)
+                .or_else(|| {
+                    self.global_metadata
+                        .get(exp_n)
+                        .map(build_blueprint_from_metadata)
+                })
+            {
                 let actual_str = actual.as_str();
                 if bp.handle_accepts_type(HandleMethods::Equal, &actual_str)
                     || bp.handle_accepts_type(HandleMethods::EqualAssign, &actual_str)
@@ -331,7 +493,8 @@ impl SemanticAnalyzer {
                             if c.params.len() == 1 {
                                 let param_t = &c.params[0].type_node;
                                 if param_t == actual
-                                    || (param_t != expected && self.types_are_compatible_basetype(param_t, actual))
+                                    || (param_t != expected
+                                        && self.types_are_compatible_basetype(param_t, actual))
                                 {
                                     return true;
                                 }
@@ -345,7 +508,8 @@ impl SemanticAnalyzer {
                 if let SymbolKind::Variable {
                     type_node: BaseType::Type(inner),
                     ..
-                } = &sym.kind {
+                } = &sym.kind
+                {
                     if matches!(**inner, BaseType::GenericParam(_)) {
                         return true;
                     }
@@ -361,7 +525,8 @@ impl SemanticAnalyzer {
                 if let SymbolKind::Variable {
                     type_node: BaseType::Type(inner),
                     ..
-                } = &sym.kind {
+                } = &sym.kind
+                {
                     if matches!(**inner, BaseType::GenericParam(_)) {
                         return true;
                     }
@@ -538,22 +703,25 @@ impl SemanticAnalyzer {
             }
             clean = clean.trim().trim_start_matches("...");
         }
+        for prefix in &["blueprint::", "struct::", "class::", "enum::"] {
+            if let Some(rest) = clean.strip_prefix(prefix) {
+                clean = rest;
+                break;
+            }
+        }
 
         // 1. Check if defined in current environment as a generic parameter symbol
         let check_env = |name: &str| -> bool {
             if let Some(info) = self.current_env.borrow().lookup(name) {
-                match &info.kind {
-                    SymbolKind::Variable { type_node, .. } => {
-                        if matches!(type_node, BaseType::GenericParam(_)) {
+                if let SymbolKind::Variable { type_node, .. } = &info.kind {
+                    if matches!(type_node, BaseType::GenericParam(_)) {
+                        return true;
+                    }
+                    if let BaseType::Type(inner) = type_node {
+                        if matches!(**inner, BaseType::GenericParam(_)) {
                             return true;
                         }
-                        if let BaseType::Type(inner) = type_node {
-                            if matches!(**inner, BaseType::GenericParam(_)) {
-                                return true;
-                            }
-                        }
                     }
-                    _ => {}
                 }
             }
             false
@@ -563,8 +731,9 @@ impl SemanticAnalyzer {
             return true;
         }
 
-        // 2. An unbound type (not a known primitive, metadata type, or blueprint) is generic / unresolved
-        if !self.is_primitive_stack_type(clean)
+        // 2. An unbound type is only generic/unresolved if we are within a generic template context
+        if self.scope.in_generic_template
+            && !self.is_primitive_stack_type(clean)
             && !self.global_metadata.contains_key(clean)
             && self.current_env.borrow().lookup_blueprint(clean).is_none()
         {
@@ -580,26 +749,21 @@ impl SemanticAnalyzer {
         }
         let ft = self.get_fast_type(inner_type);
         if let Some(method_name) = prop.strip_prefix("has_") {
-            return Some(
-                ft.has_method(method_name)
-                    || ft.has_handle(method_name)
-                    || (method_name == "as_str"
-                        && (ft.printable() || ft.has_method("as_str") || ft.has_handle("display"))),
-            );
+            return Some(ft.has_method(method_name) || ft.has_handle(method_name));
         }
         match prop {
-            "printable" | "is_printable" => Some(ft.printable()),
-            "is_pointer" => Some(ft.is_pointer()),
-            "is_array" => Some(ft.is_array()),
-            "is_primitive" => Some(ft.is_primitive()),
-            "throwable" | "is_throwable" => Some(ft.throwable()),
-            "shareable" | "is_shareable" => Some(ft.shareable()),
-            "copyable" | "is_copyable" => Some(ft.copyable()),
-            "castable" | "is_castable" => Some(ft.castable()),
-            "is_constant" | "is_const" => Some(ft.is_constant()),
-            "is_runtime" => Some(ft.is_runtime()),
-            "is_comptime" => Some(ft.is_comptime()),
-            "is_undefined" => Some(ft.is_undefined()),
+            "printable" => Some(ft.printable()),
+            "pointer" => Some(ft.is_pointer()),
+            "array" => Some(ft.is_array()),
+            "primitive" => Some(ft.is_primitive()),
+            "throwable" => Some(ft.throwable()),
+            "shareable" => Some(ft.shareable()),
+            "copyable" => Some(ft.copyable()),
+            "castable" => Some(ft.castable()),
+            "constant" => Some(ft.is_constant()),
+            "runtime" => Some(ft.is_runtime()),
+            "comptime" => Some(ft.is_comptime()),
+            "undefined" => Some(ft.is_undefined()),
             _ => None,
         }
     }

@@ -237,7 +237,7 @@ fn run_directory_tests(test_dir: &Path, backend: &str) {
                 let build_exe = build_dir.join(if cfg!(windows) {
                     format!("{}.exe", base_name)
                 } else {
-                    format!("{}", base_name)
+                    base_name.to_string()
                 });
                 let build_cpp = build_dir.join(format!("{}.cpp", base_name));
                 let build_o = build_dir.join(format!("{}.o", base_name));

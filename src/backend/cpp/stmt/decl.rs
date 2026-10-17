@@ -34,17 +34,14 @@ impl CodeGenerator {
                     self.address_vars.insert(name.clone());
                     self.address_vars.insert(format!("this->{}", name));
                 }
-                let is_param = match value {
-                    Expr::Identifier(s) if s == "__param__" => true,
-                    _ => false,
-                };
+                let is_param = matches!(value, Expr::Identifier(s) if s == "__param__");
                 let is_const = editability == &Editability::NotEditable;
                 let const_prefix = if is_const { "const " } else { "" };
                 self.vars.insert(name.clone(), cpp_type.clone());
                 if let Some(ref cls) = self.current_class_name {
                     self.struct_field_types
                         .entry(cls.clone())
-                        .or_insert_with(std::collections::HashMap::new)
+                        .or_default()
                         .insert(name.clone(), cpp_type.clone());
                 }
                 let is_smart_or_raw = is_raw_pointer(type_node, &cpp_type)
@@ -96,11 +93,10 @@ impl CodeGenerator {
                     self.visit_expression(value)
                 };
 
-                if matches!(type_node, BaseType::Address(_)) || cpp_type.ends_with('&') {
-                    if val_code.starts_with('&') {
+                if (matches!(type_node, BaseType::Address(_)) || cpp_type.ends_with('&'))
+                    && val_code.starts_with('&') {
                         val_code = val_code[1..].to_string();
                     }
-                }
 
                 if cpp_type.contains('<') {
                     let raw_name = cpp_type.split('<').next().unwrap_or(&cpp_type);
@@ -113,11 +109,9 @@ impl CodeGenerator {
                 if self
                     .current_block_vars
                     .as_ref()
-                    .map_or(false, |bv| bv.contains(name))
+                    .is_some_and(|bv| bv.contains(name))
                 {
-                    if assign_op == "->" {
-                        self.emit(&format!("this->{} = {};", name, val_code));
-                    } else if !val_code.is_empty() && val_code != "{}" {
+                    if assign_op == "->" || (!val_code.is_empty() && val_code != "{}") {
                         self.emit(&format!("this->{} = {};", name, val_code));
                     }
                 } else if is_param || (matches!(value, Expr::Default(None)) && assign_op.is_empty())
@@ -127,10 +121,8 @@ impl CodeGenerator {
                     if self
                         .find_assign_handle(&cpp_type, &["arrow_assign"])
                         .is_some()
+                        || (val_code.starts_with('{') && val_code.ends_with('}'))
                     {
-                        self.emit(&format!("{}{} {};", const_prefix, cpp_type, name));
-                        self.emit(&format!("{}.arrow_assign({});", name, val_code));
-                    } else if val_code.starts_with('{') && val_code.ends_with('}') {
                         self.emit(&format!("{}{} {};", const_prefix, cpp_type, name));
                         self.emit(&format!("{}.arrow_assign({});", name, val_code));
                     } else {
@@ -563,6 +555,14 @@ impl CodeGenerator {
                         for s in body {
                             self.visit_statement(s);
                         }
+                        if ret_type_str != "void"
+                            && !body
+                                .last()
+                                .map(|s| matches!(s, Stmt::ReturnStmt(_)))
+                                .unwrap_or(false)
+                        {
+                            self.emit("return {};");
+                        }
                     }
                 }
                 self.indent_level -= 1;
@@ -666,7 +666,7 @@ impl CodeGenerator {
                     self.emit("this->has_yielded = false;");
                     self.emit("this->is_done = true;");
                 }
-                if return_type.as_ref().map_or(false, |t| *t != BaseType::Void) {
+                if return_type.as_ref().is_some_and(|t| *t != BaseType::Void) {
                     self.emit("return {};");
                 }
                 self.indent_level -= 1;

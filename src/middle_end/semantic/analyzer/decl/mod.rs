@@ -78,9 +78,9 @@ impl SemanticAnalyzer {
                 public_block,
                 private_block,
                 static_block,
+                generics,
                 handle_block,
                 constructor,
-                ..
             } => {
                 self.visit_class_decl(
                     visibility,
@@ -90,6 +90,7 @@ impl SemanticAnalyzer {
                     public_block,
                     private_block,
                     static_block,
+                    generics,
                     handle_block,
                     constructor,
                 )
@@ -104,7 +105,6 @@ impl SemanticAnalyzer {
                 handle_block,
                 static_block,
                 constructor,
-                ..
             } => {
                 self.visit_struct_decl(
                     visibility,
@@ -113,6 +113,7 @@ impl SemanticAnalyzer {
                     public_block,
                     private_block,
                     static_block,
+                    &[],
                     handle_block,
                     constructor,
                 )
@@ -222,10 +223,10 @@ impl SemanticAnalyzer {
             Decl::DefineDecl {
                 name,
                 type_alias,
+                value,
                 visibility,
-                ..
             } => {
-                self.visit_define_decl(name, type_alias, visibility)
+                self.visit_define_decl(name, type_alias, value, visibility)
             }
 
             Decl::NamespaceDecl { name, decls, .. } => {

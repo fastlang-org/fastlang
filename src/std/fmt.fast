@@ -10,7 +10,7 @@ extern @c :: {
 public fn print<...T>(...args: ...T) -> void {
     @compile {
         for arg in args {
-            if (!typeof(arg).printable) {
+            if (!typeof(arg).printable()) {
                 @compile::throw new Error("Argument type is not printable");
             }
         }
@@ -25,7 +25,7 @@ public fn print<...T>(...args: ...T) -> void {
 public fn println<...T>(...args: ...T) -> void {
     @compile {
         for arg in args {
-            if (!typeof(arg).printable) {
+            if (!typeof(arg).printable()) {
                 @compile::throw new Error("Argument type is not printable: " + typeof(arg).as_str());
             }
         }

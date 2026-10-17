@@ -11,6 +11,12 @@ pub struct CraneliftAotBackend {
     funcs: HashMap<String, cranelift_module::FuncId>,
 }
 
+impl Default for CraneliftAotBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CraneliftAotBackend {
     pub fn new() -> Self {
         let mut flag_builder = settings::builder();

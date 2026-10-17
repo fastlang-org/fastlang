@@ -11,6 +11,12 @@ pub struct CraneliftBackend {
     ctx: codegen::Context,
 }
 
+impl Default for CraneliftBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CraneliftBackend {
     pub fn new() -> Self {
         let mut flag_builder = settings::builder();

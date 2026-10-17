@@ -254,43 +254,32 @@ impl SemanticAnalyzer {
         &mut self,
         name: &str,
         type_alias: &Option<BaseType>,
+        value: &Option<Expr>,
         visibility: &Visibility,
     ) -> Result<(), String> {
-        if let Some(t) = type_alias {
-            let info = SymbolInfo {
-                name: name.to_string(),
-                kind: SymbolKind::Variable {
-                    type_node: BaseType::Type(Box::new(t.clone())),
-                    editability: Editability::NotEditable,
-                    is_array: false,
-                },
-                visibility: visibility.clone(),
-                dependencies: vec![],
-                is_used: false,
-                is_param: false,
-                is_uninitialized: false,
-                is_compilable: true,
-            };
-            self.current_env
-                .borrow_mut()
-                .define_or_update(name.to_string(), info);
+        let (type_node, is_compilable) = if let Some(t) = type_alias {
+            (BaseType::Type(Box::new(t.clone())), true)
+        } else if let Some(val) = value {
+            let t_str = self.visit_expression(val)?;
+            (BaseType::from_str(&t_str), true)
         } else {
-            let info = SymbolInfo {
-                name: name.to_string(),
-                kind: SymbolKind::Variable {
-                    type_node: BaseType::Int(Size::S32),
-                    editability: Editability::NotEditable,
-                    is_array: false,
-                },
-                visibility: Visibility::Public,
-                dependencies: vec![],
-                is_used: false,
-                is_param: false,
-                is_uninitialized: false,
-                is_compilable: false,
-            };
-            self.current_env.borrow_mut().define_or_update(name.to_string(), info);
-        }
+            (BaseType::Int(Size::S32), false)
+        };
+        let info = SymbolInfo {
+            name: name.to_string(),
+            kind: SymbolKind::Variable {
+                type_node,
+                editability: Editability::NotEditable,
+                is_array: false,
+            },
+            visibility: visibility.clone(),
+            dependencies: vec![],
+            is_used: false,
+            is_param: false,
+            is_uninitialized: false,
+            is_compilable,
+        };
+        self.current_env.borrow_mut().define_or_update(name.to_string(), info);
         Ok(())
     }
 
@@ -337,8 +326,19 @@ impl SemanticAnalyzer {
             );
         }
 
-        if assign_op == ":=" {
-            if self.current_env.borrow().symbols.contains_key(name) {
+        if !self.is_known_type(type_node) {
+            let type_str = type_node
+                .type_name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| type_node.as_str());
+            return Err(format!(
+                "Semantic Error: Type '{}' is not defined in this scope.",
+                type_str
+            ));
+        }
+
+        if assign_op == ":="
+            && self.current_env.borrow().symbols.contains_key(name) {
                 return Err(
                     format!(
                         "Semantic Error: Variable '{}' is already defined in this scope. Cannot redeclare using ':='.",
@@ -346,7 +346,6 @@ impl SemanticAnalyzer {
                     )
                 );
             }
-        }
 
         let mut expr_type: String = self.visit_expression(value)?;
         if expr_type == "int" {
@@ -395,12 +394,11 @@ impl SemanticAnalyzer {
                     // Check if bp_name is a type alias defined via define
                     let is_alias_compatible =
                         if let Some(info) = self.current_env.borrow().lookup(&bp_name) {
-                            if let SymbolKind::Variable { type_node, .. } = &info.kind {
-                                if let BaseType::Type(inner) = type_node {
-                                    self.types_are_compatible(&inner.as_str(), &expr_type)
-                                } else {
-                                    false
-                                }
+                            if let SymbolKind::Variable {
+                                type_node: BaseType::Type(inner),
+                                ..
+                            } = &info.kind {
+                                self.types_are_compatible(&inner.as_str(), &expr_type)
                             } else {
                                 false
                             }
@@ -420,11 +418,10 @@ impl SemanticAnalyzer {
                     } else if assign_op == "=" {
                         return Err(
                             format!(
-                                "Semantic Error [1796]: Type mismatch for '{}'. Declared '{}', got '{}' (value: {:?})",
+                                "Semantic Error: Type mismatch for '{}'. Declared '{}', got '{}'",
                                 name,
                                 declared_type,
-                                expr_type,
-                                value
+                                expr_type
                             )
                         );
                     } else {
@@ -525,9 +522,7 @@ impl SemanticAnalyzer {
                         if is_lambda_untyped
                             && params.iter().any(|p| p.type_node == BaseType::Unknown)
                         {
-                            return Err(format!(
-                                "Semantic Error: Lambda parameters must have explicit type annotations when target type is not declared (e.g. '|x: int, y: int|')"
-                            ));
+                            return Err("Semantic Error: Lambda parameters must have explicit type annotations when target type is not declared (e.g. '|x: int, y: int|')".to_string());
                         }
                     }
 
@@ -541,11 +536,10 @@ impl SemanticAnalyzer {
                     {
                         return Err(
                             format!(
-                                "Semantic Error [1892]: Type mismatch for '{}'. Declared '{}', got '{}' (value: {:?})",
+                                "Semantic Error: Type mismatch for '{}'. Declared '{}', got '{}'",
                                 name,
                                 declared_type,
-                                expr_type,
-                                value
+                                expr_type
                             )
                         );
                     }

@@ -77,8 +77,31 @@ public class KeyError extends Error -> {
     }
 }
 
+public class labelLimitError extends Error -> {
+    public -> {
+        char labelname[];
+        int32 limit = 0;
+        int32 count = 0;
+    }
+    constructor -> {
+        init(labelname: char[], limit: int32, count: int32) -> {
+            this.labelname = labelname;
+            this.limit = limit;
+            this.count = count;
+            this.message = "Label limit exceeded for '" + labelname + "'";
+            this.code = 5;
+        }
+    }
+    handle -> {
+        fn $throw() -> labelLimitError {
+            return this;
+        }
+    }
+}
+
 public @compile :: {
     macro $throw[e: Error] -> {
         throw e;
     }
 }
+

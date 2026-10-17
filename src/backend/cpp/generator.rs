@@ -42,6 +42,12 @@ pub struct CodeGenerator {
     pub(crate) type_aliases: HashMap<String, String>,
 }
 
+impl Default for CodeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodeGenerator {
     pub fn new() -> Self {
         CodeGenerator {
@@ -144,14 +150,18 @@ impl CodeGenerator {
                             } else {
                                 (ret_str.clone(), false)
                             };
+                            let is_comparison = matches!(o, "==" | "!=" | ">" | "<" | ">=" | "<=");
+                            let const_qual = if is_comparison { " const" } else { "" };
                             self.emit(&format!(
-                                "{} operator{}({} {}) {{",
-                                op_ret, o, param_type, param_name
+                                "{} operator{}(const {}& {}){} {{",
+                                op_ret, o, param_type, param_name, const_qual
                             ));
                             self.indent_level += 1;
                             if is_void {
                                 self.emit(&format!("this->{}({});", name, param_name));
                                 self.emit("return *this;");
+                            } else if is_comparison {
+                                self.emit(&format!("return const_cast<std::decay_t<decltype(*this)>*>(this)->{}({});", name, param_name));
                             } else {
                                 self.emit(&format!("return this->{}({});", name, param_name));
                             }
@@ -224,6 +234,12 @@ impl CodeGenerator {
                             self.indent_level -= 1;
                             self.emit("}");
                         }
+                    } else if name == "$display" && params.is_empty() {
+                        self.emit(&format!("{} display() {{", ret_str));
+                        self.indent_level += 1;
+                        self.emit("return this->_f_display();");
+                        self.indent_level -= 1;
+                        self.emit("}");
                     }
                 }
             }
@@ -358,7 +374,7 @@ impl CodeGenerator {
                         fields_map.insert(f.name.clone(), type_to_cpp(&f.type_node));
                         self.type_own_members
                             .entry(clean_name.clone())
-                            .or_insert_with(HashSet::new)
+                            .or_default()
                             .insert(f.name.clone());
                     }
                     self.struct_field_types
@@ -368,7 +384,7 @@ impl CodeGenerator {
                 if let Some(sd) = share_directive {
                     self.type_own_members
                         .entry(clean_name.clone())
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(sd.target_field.clone());
                 }
             } else if let Stmt::Declaration(Decl::StructDecl {
@@ -387,7 +403,7 @@ impl CodeGenerator {
                 self.struct_field_counts.insert(name.clone(), cnt);
                 self.target_handle_methods
                     .entry(name.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .extend(handle_block.clone());
                 let mut fields_map = HashMap::new();
                 for d in public_block.iter().chain(private_block.iter()) {
@@ -424,7 +440,7 @@ impl CodeGenerator {
                 self.struct_field_counts.insert(name.clone(), cnt);
                 self.target_handle_methods
                     .entry(name.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .extend(handle_block.clone());
                 let mut fields_map = HashMap::new();
                 for d in public_block.iter().chain(private_block.iter()) {
@@ -451,7 +467,7 @@ impl CodeGenerator {
             {
                 self.target_handle_methods
                     .entry(name.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .extend(handle_block.clone());
             } else if let Stmt::Declaration(Decl::MachineDecl {
                 name, handle_block, ..
@@ -459,7 +475,7 @@ impl CodeGenerator {
             {
                 self.target_handle_methods
                     .entry(name.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .extend(handle_block.clone());
             } else if let Stmt::Declaration(Decl::ImplDecl {
                 target,
@@ -490,7 +506,7 @@ impl CodeGenerator {
                             let list = self
                                 .primitive_impl_methods
                                 .entry(name.clone())
-                                .or_insert_with(Vec::new);
+                                .or_default();
                             if !list.contains(&prim_target) {
                                 list.push(prim_target.clone());
                             }
@@ -504,7 +520,7 @@ impl CodeGenerator {
                             let list = self
                                 .primitive_impl_methods
                                 .entry(name.clone())
-                                .or_insert_with(Vec::new);
+                                .or_default();
                             if !list.contains(&prim_target) {
                                 list.push(prim_target.clone());
                             }
@@ -532,7 +548,7 @@ impl CodeGenerator {
                             }
                             self.type_own_members
                                 .entry(clean_target.clone())
-                                .or_insert_with(HashSet::new)
+                                .or_default()
                                 .insert(fn_name.clone());
                         }
                     }
@@ -540,22 +556,22 @@ impl CodeGenerator {
                         if let Decl::FnDecl { name: fn_name, .. } = m {
                             self.type_own_members
                                 .entry(clean_target.clone())
-                                .or_insert_with(HashSet::new)
+                                .or_default()
                                 .insert(fn_name.clone());
                         }
                     }
                     self.function_handles
                         .entry(target.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .extend(handle_block.clone());
                     self.target_handle_methods
                         .entry(target.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .extend(handle_block.clone());
                     if !*is_handle_impl {
                         self.target_impl_methods
                             .entry(target.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .extend(methods.clone());
                     }
                 }
@@ -645,6 +661,7 @@ impl CodeGenerator {
         > = HashMap::new();
         let mut impls: HashMap<String, Vec<Decl>> = HashMap::new();
         let mut blueprint_handles: HashMap<String, Vec<Decl>> = HashMap::new();
+        #[allow(clippy::type_complexity)]
         let mut primitive_impls: Vec<(String, Vec<BaseType>, Vec<Decl>, Vec<Decl>)> = Vec::new();
 
         for stmt in &flat_ast {
@@ -696,16 +713,16 @@ impl CodeGenerator {
                     if *is_handle_impl {
                         blueprint_handles
                             .entry(target.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .extend(handle_block.clone());
                     } else {
                         impls
                             .entry(target.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .extend(methods.clone());
                         blueprint_handles
                             .entry(target.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .extend(handle_block.clone());
                     }
                 }
@@ -1167,6 +1184,14 @@ impl CodeGenerator {
                             self.emit("        this->drop();");
                             self.emit("    }");
                             self.emit("}");
+                            self.emit(&format!("~{}() {{ this->_fastlang_call_drop(); }}", name));
+                            if share_directive.is_none() {
+                                self.emit(&format!("{}() = default;", name));
+                                self.emit(&format!("{}(const {}&) = default;", name, name));
+                                self.emit(&format!("{}& operator=(const {}&) = default;", name, name));
+                            }
+                            self.emit(&format!("{}({}&& _other) noexcept {{ *this = _other; _other._fastlang_dropped = true; }}", name, name));
+                            self.emit(&format!("{}& operator=({}&& _other) noexcept {{ if (this != &_other) {{ this->_fastlang_call_drop(); *this = _other; _other._fastlang_dropped = true; this->_fastlang_dropped = false; }} return *this; }}", name, name));
                         }
                     }
 
@@ -1416,6 +1441,14 @@ impl CodeGenerator {
                     self.current_primitive_target = Some(clean_target.clone());
                     for s in body {
                         self.visit_statement(s);
+                    }
+                    if ret_cpp != "void"
+                        && !body
+                            .last()
+                            .map(|s| matches!(s, Stmt::ReturnStmt(_)))
+                            .unwrap_or(false)
+                    {
+                        self.emit("return {};");
                     }
                     self.in_primitive_impl = prev_prim;
                     self.current_primitive_target = prev_target;

@@ -45,12 +45,18 @@ fn test_smart_pointers() -> void {
     println("val after direct +=: ", num); // EXPECT: val after direct +=: 65
 }
 
+fn test_auto_scope() -> void {
+    StackResource s_auto;
+}
+
 fn test_del_and_drop() -> void {
     Resource res = new Resource(42);
     del res; // EXPECT: Resource 42 dropped!
 
     StackResource s;
     del s; // EXPECT: StackResource 999 dropped!
+
+    test_auto_scope(); // EXPECT: StackResource 999 dropped!
 }
 
 fn test_dynamic_heap_allocations() -> void {

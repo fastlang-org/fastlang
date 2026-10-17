@@ -146,19 +146,12 @@ impl SemanticAnalyzer {
             format!("{}<{}>", target, g_str.join(", "))
         };
 
-        if self.global_metadata.get(&spec_key).is_none() {
+        if !self.global_metadata.contains_key(&spec_key) {
             self.global_metadata.insert(
                 spec_key.clone(),
                 TypeMetadata {
                     name: spec_key.clone(),
-                    ty: if target == "array" && !target_generics.is_empty() {
-                        BaseType::Array {
-                            base_type: Box::new(target_generics[0].clone()),
-                            size: Box::new(None),
-                        }
-                    } else {
-                        BaseType::from_str(target)
-                    },
+                    ty: BaseType::from_impl_target(target, target_generics),
                     fields: std::collections::HashMap::new(),
                     methods: std::collections::HashMap::new(),
                     constructor: None,
@@ -168,6 +161,10 @@ impl SemanticAnalyzer {
                     variants: None,
                 },
             );
+        } else if let Some(entry) = self.global_metadata.get_mut(&spec_key) {
+            if !target_generics.is_empty() {
+                entry.ty = BaseType::from_impl_target(target, target_generics);
+            }
         }
 
         let is_fn = symbol_opt
@@ -217,13 +214,12 @@ impl SemanticAnalyzer {
                             format!("Semantic Error: Operator overloading and 'call' handles are not allowed on function '{}'", target)
                         );
                     }
-                } else if is_block {
-                    if op_names.contains(&h_name.as_str()) {
+                } else if is_block
+                    && op_names.contains(&h_name.as_str()) {
                         return Err(
                             format!("Semantic Error: Operator overloading handles are not allowed on block '{}'", target)
                         );
                     }
-                }
 
                 if matches!(
                     h_name.as_str(),
@@ -364,6 +360,16 @@ impl SemanticAnalyzer {
                     );
                 }
                 self.current_env.borrow_mut().mutate_blueprint(target, |bp| {
+                    let gen_params: Vec<String> = target_generics
+                        .iter()
+                        .filter_map(|g| match g {
+                            BaseType::GenericParam(n) => Some(n.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !gen_params.is_empty() {
+                        bp.generics = gen_params;
+                    }
                     bp.methods.insert(
                         name.clone(),
                         FnSignature {
@@ -406,10 +412,15 @@ impl SemanticAnalyzer {
                     );
                 }
                 self.current_env.borrow_mut().mutate_blueprint(target, |bp| {
-                    if bp.generics.is_empty() {
-                        for g in target_generics {
-                            bp.generics.push(g.as_str());
-                        }
+                    let gen_params: Vec<String> = target_generics
+                        .iter()
+                        .filter_map(|g| match g {
+                            BaseType::GenericParam(n) => Some(n.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !gen_params.is_empty() {
+                        bp.generics = gen_params;
                     }
                     if hk != HandleMethods::NotFound && !bp.handles.contains(&hk) {
                         bp.handles.insert(hk);

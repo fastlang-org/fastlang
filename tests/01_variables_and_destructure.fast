@@ -100,12 +100,24 @@ fn test_dotdot_destructure() -> void {
     PointBp {c, ..} = make_point_bp();
     println("dotdot c: ", c); // EXPECT: dotdot c: 10
 }
-
+fn test_option() -> void {
+    Option<int> (a,b),c = Some(10), None;
+    if(a == b) {
+        println("Some 1 test passed"); // EXPECT: Some 1 test passed
+    }
+    if(b == Some(10)) {
+        println("Some 2 test passed"); // EXPECT: Some 2 test passed
+    }
+    if(c == None) {
+        println("None test passed"); // EXPECT: None test passed
+    }
+}
 fn main() -> int32 {
     test_primitives_and_sizes();
     test_walrus_and_inference();
     test_destructuring_and_tuples();
     test_dotdot_destructure();
+    test_option();
     println("ALL 01_VARIABLES TESTS PASSED"); // EXPECT: ALL 01_VARIABLES TESTS PASSED
     return 0;
 }

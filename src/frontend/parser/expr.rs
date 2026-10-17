@@ -596,13 +596,6 @@ impl Parser {
                             methods,
                             generics,
                         })
-                    } else if meta.ty.as_str().starts_with("blueprint") {
-                        Ok(BaseType::Blueprint {
-                            name: n.clone(),
-                            fields,
-                            methods,
-                            generics,
-                        })
                     } else {
                         Ok(BaseType::Blueprint {
                             name: n.clone(),
@@ -1205,19 +1198,12 @@ impl Parser {
             // --- Keywords used as identifier expressions (e.g. `flag && check`) ---
             // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             other => {
-                //debug
-                println!(
-                    "DEBUG: Unexpected token '{:?}' in expression at line {}, col {}",
-                    other,
-                    self.peek().line,
-                    self.peek().column
-                );
-                return Err(format!(
+                Err(format!(
                     "Syntax Error: Unexpected token '{:?}' in expression at line {}, col {}",
                     other,
                     self.peek().line,
                     self.peek().column
-                ));
+                ))
             }
         }
     }

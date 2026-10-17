@@ -23,13 +23,13 @@ public @compile :: {
     impl type<T> -> {
         set printable() -> bool;
         set as_str() -> str; 
-        set is_pointer() -> bool;
-        set is_array() -> bool;
+        set pointer() -> bool;
+        set array() -> bool;
        // set is_const() -> bool;
-        set is_constant() -> bool;
-        set is_undefined() -> bool;
-        set is_runtime() -> bool;
-        set is_comptime() -> bool;
+        set constant() -> bool;
+        set undefined() -> bool;
+        set runtime() -> bool;
+        set comptime() -> bool;
         set has_handle(char[]) -> bool;
         set has_handle(type) -> bool;
         set has_handle(char[], type) -> bool;
@@ -39,7 +39,7 @@ public @compile :: {
         set has_field(char[]) -> bool;
         set has_field(type) -> bool;
         set has_field(char[], type) -> bool;
-        set is_primitive() -> bool;
+        set primitive() -> bool;
         set throwable() -> bool;
         set shareable() -> bool;
         set copyable() -> bool;
@@ -61,10 +61,10 @@ public @compile :: {
         throw new Error("TODO: " + msg);
     }
     method cast<Target, Source>(val: Source) -> Target {
-        if (!Source.is_primitive()) {
+        if (!Source.primitive()) {
             throw new Error("casting not supported for non primitive types");
         }
-        if (!Target.is_primitive()) {
+        if (!Target.primitive()) {
             throw new Error("target type is not a primitive type");
         }
         if (Source.castable_to(Target)) {

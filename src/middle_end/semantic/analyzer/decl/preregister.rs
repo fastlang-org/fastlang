@@ -132,16 +132,27 @@ impl SemanticAnalyzer {
                         }
                         Decl::ImplDecl {
                             target,
+                            target_generics,
                             methods,
                             handle_block,
                             ..
                         } => {
+                        let spec_key = if target_generics.is_empty()
+                            || target_generics
+                                .iter()
+                                .all(|g| matches!(g, BaseType::GenericParam(_)))
+                        {
+                            target.clone()
+                        } else {
+                            let g_str: Vec<String> = target_generics.iter().map(|g| g.as_str()).collect();
+                            format!("{}<{}>", target, g_str.join(", "))
+                        };
                         let entry =
                             self.global_metadata
-                                .entry(target.clone())
+                                .entry(spec_key.clone())
                                 .or_insert_with(|| TypeMetadata {
-                                    name: target.clone(),
-                                    ty: BaseType::from_str(target),
+                                    name: spec_key.clone(),
+                                    ty: BaseType::from_impl_target(target, target_generics),
                                     fields: std::collections::HashMap::new(),
                                     methods: std::collections::HashMap::new(),
                                     constructor: None,
@@ -150,6 +161,9 @@ impl SemanticAnalyzer {
                                     vars: std::collections::HashMap::new(),
                                     variants: None,
                                 });
+                        if !target_generics.is_empty() {
+                            entry.ty = BaseType::from_impl_target(target, target_generics);
+                        }
                         for m in methods {
                             if let Decl::FnDecl {
                                 name,
@@ -255,14 +269,7 @@ impl SemanticAnalyzer {
                     .entry(spec_key.clone())
                     .or_insert_with(|| TypeMetadata {
                         name: spec_key.clone(),
-                        ty: if target == "array" && !target_generics.is_empty() {
-                            BaseType::Array {
-                                base_type: Box::new(target_generics[0].clone()),
-                                size: Box::new(None),
-                            }
-                        } else {
-                            BaseType::from_str(target)
-                        },
+                        ty: BaseType::from_impl_target(target, target_generics),
                         fields: std::collections::HashMap::new(),
                         methods: std::collections::HashMap::new(),
                         constructor: None,
@@ -271,6 +278,9 @@ impl SemanticAnalyzer {
                         vars: std::collections::HashMap::new(),
                         variants: None,
                     });
+                if !target_generics.is_empty() {
+                    entry.ty = BaseType::from_impl_target(target, target_generics);
+                }
                 for m in methods {
                     if let Decl::FnDecl {
                         name,
@@ -507,30 +517,29 @@ impl SemanticAnalyzer {
             }
             Decl::DefineDecl {
                 name,
-                type_alias,
+                type_alias: Some(t),
                 visibility,
                 ..
             } => {
-                if let Some(t) = type_alias {
-                    let info = SymbolInfo {
-                        name: name.clone(),
-                        kind: SymbolKind::Variable {
-                            type_node: BaseType::Type(Box::new(t.clone())),
-                            editability: Editability::NotEditable,
-                            is_array: false,
-                        },
-                        visibility: visibility.clone(),
-                        dependencies: vec![],
-                        is_used: false,
-                        is_param: false,
-                        is_uninitialized: false,
-                        is_compilable: true,
-                    };
-                    self.current_env
-                        .borrow_mut()
-                        .define_or_update(name.clone(), info);
-                }
+                let info = SymbolInfo {
+                    name: name.clone(),
+                    kind: SymbolKind::Variable {
+                        type_node: BaseType::Type(Box::new(t.clone())),
+                        editability: Editability::NotEditable,
+                        is_array: false,
+                    },
+                    visibility: visibility.clone(),
+                    dependencies: vec![],
+                    is_used: false,
+                    is_param: false,
+                    is_uninitialized: false,
+                    is_compilable: true,
+                };
+                self.current_env
+                    .borrow_mut()
+                    .define_or_update(name.clone(), info);
             }
+            Decl::DefineDecl { .. } => {}
             _ => {}
         }
         Ok(())

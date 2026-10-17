@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::rc::Rc;
 
-use crate::backend::cranelift::aot::CraneliftAotBackend;
 use crate::backend::cpp::runtime::generate_runtime_header;
+use crate::backend::cranelift::aot::CraneliftAotBackend;
 use crate::backend::*;
 use crate::frontend::parser::ast::*;
 use crate::frontend::parser::ast_json::ast_to_json_string;
@@ -20,7 +20,7 @@ pub mod loader;
 pub mod middle_end;
 pub mod project;
 
-pub fn report_visual_error(source: &str, line: usize, column: usize, err_msg: &str) {
+pub fn report_visual_error(source: &str, file: &str, line: usize, column: usize, err_msg: &str) {
     let lines: Vec<&str> = source.lines().collect();
 
     let context_lines = 2;
@@ -30,36 +30,206 @@ pub fn report_visual_error(source: &str, line: usize, column: usize, err_msg: &s
         1
     };
     let end_line = std::cmp::min(line + context_lines, lines.len());
+    let line_str_len = format!("{}", end_line).len().max(3);
 
     eprintln!("\n\x1b[31;1merror:\x1b[0m {}", err_msg);
-    eprintln!("  \x1b[34;1m-->\x1b[0m line {}:{}", line, column);
-    eprintln!("   \x1b[34;1m|\x1b[0m");
+    if file.is_empty() {
+        eprintln!("  \x1b[36;1m-->\x1b[0m line {}:{}", line, column);
+    } else {
+        eprintln!("  \x1b[36;1m-->\x1b[0m {}:{}:{}", file, line, column);
+    }
+    eprintln!("{:width$} \x1b[36;1m|\x1b[0m", "", width = line_str_len);
 
     for i in start_line..=end_line {
         let i_minus_1 = i - 1;
         if i_minus_1 < lines.len() {
             let l_text = lines[i_minus_1];
             if i == line {
-                eprintln!("{:3}\x1b[34;1m |\x1b[0m {}", i, l_text);
-                let padding = " ".repeat(if column > 0 { column - 1 } else { 0 });
-                eprintln!("   \x1b[34;1m|\x1b[0m {}\x1b[31;1m^\x1b[0m", padding);
+                eprintln!(
+                    "{:width$} \x1b[36;1m|\x1b[0m {}",
+                    i,
+                    l_text,
+                    width = line_str_len
+                );
+                let col_offset = if column > 0 { column - 1 } else { 0 };
+                let padding = " ".repeat(col_offset);
+                eprintln!(
+                    "{:width$} \x1b[36;1m|\x1b[0m {}\x1b[31;1m^\x1b[0m",
+                    "",
+                    padding,
+                    width = line_str_len
+                );
             } else {
-                eprintln!("{:3}\x1b[34;1m |\x1b[0m {}", i, l_text);
+                eprintln!(
+                    "{:width$} \x1b[36;1m|\x1b[0m {}",
+                    i,
+                    l_text,
+                    width = line_str_len
+                );
             }
         }
     }
-    eprintln!("   \x1b[34;1m|\x1b[0m\n");
+    eprintln!("{:width$} \x1b[36;1m|\x1b[0m\n", "", width = line_str_len);
 }
 
 pub fn extract_line_col_from_msg(msg: &str) -> (Option<usize>, Option<usize>) {
     if let Some(idx) = msg.find("at line ") {
         let sub = &msg[idx + 8..];
-        let mut parts = sub.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty());
+        let mut parts = sub
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|s| !s.is_empty());
         let line = parts.next().and_then(|s| s.parse::<usize>().ok());
         let col = parts.next().and_then(|s| s.parse::<usize>().ok());
         (line, col)
     } else {
         (None, None)
+    }
+}
+
+pub fn locate_semantic_error_in_source(source: &str, err_msg: &str) -> (usize, usize) {
+    if let (Some(l), Some(c)) = extract_line_col_from_msg(err_msg) {
+        return (l, c);
+    }
+
+    let mut quoted = Vec::new();
+    let mut start_quote = None;
+    for (i, ch) in err_msg.char_indices() {
+        if ch == '\'' {
+            if let Some(s) = start_quote {
+                quoted.push(&err_msg[s + 1..i]);
+                start_quote = None;
+            } else {
+                start_quote = Some(i);
+            }
+        }
+    }
+
+    let lines: Vec<&str> = source.lines().collect();
+
+    if err_msg.contains("Return type mismatch") {
+        for (idx, line) in lines.iter().enumerate().rev() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("return ") || trimmed == "return;" || trimmed.starts_with("return\t") {
+                let pos = line.find("return").unwrap_or(0);
+                return (idx + 1, pos + 1);
+            }
+        }
+    }
+
+    if err_msg.contains("declared but never used") && !quoted.is_empty() {
+        let var_name = quoted[0];
+        for (idx, line) in lines.iter().enumerate() {
+            if let Some(pos) = line.find(var_name) {
+                let before = if pos == 0 { ' ' } else { line[..pos].chars().last().unwrap_or(' ') };
+                let after_idx = pos + var_name.len();
+                let after = if after_idx >= line.len() { ' ' } else { line[after_idx..].chars().next().unwrap_or(' ') };
+                if (!before.is_alphanumeric() && before != '_') && (!after.is_alphanumeric() && after != '_') {
+                    return (idx + 1, pos + 1);
+                }
+            }
+        }
+    }
+
+    if err_msg.contains("function") && !quoted.is_empty() {
+        let fn_name = quoted[0];
+        for (idx, line) in lines.iter().enumerate() {
+            if let Some(pos) = line.find(&format!("fn {}", fn_name)) {
+                return (idx + 1, pos + 4);
+            }
+            if let Some(pos) = line.find(&format!("method {}", fn_name)) {
+                return (idx + 1, pos + 8);
+            }
+        }
+    }
+
+    if err_msg.contains("Cannot reassign") && !quoted.is_empty() {
+        let var_name = quoted[0];
+        for (idx, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if (trimmed.starts_with(var_name) || line.contains(&format!(" {}", var_name)))
+                && (trimmed.contains('=') || trimmed.contains("+=") || trimmed.contains("-="))
+                && !trimmed.starts_with("const ")
+                && !trimmed.starts_with("int")
+                && !trimmed.starts_with("str")
+                && !trimmed.starts_with("bool")
+            {
+                if let Some(pos) = line.find(var_name) {
+                    return (idx + 1, pos + 1);
+                }
+            }
+        }
+    }
+
+    if err_msg.contains("Type '") && !quoted.is_empty() {
+        let type_name = quoted[0];
+        for (idx, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("int")
+                || trimmed.starts_with("uint")
+                || trimmed.starts_with("str")
+                || trimmed.starts_with("bool")
+                || trimmed.starts_with("float")
+                || trimmed.starts_with("const ")
+            {
+                continue;
+            }
+            if let Some(pos) = line.find(type_name) {
+                return (idx + 1, pos + 1);
+            }
+        }
+    }
+
+    for sym in &quoted {
+        if sym.is_empty() {
+            continue;
+        }
+        for (idx, line) in lines.iter().enumerate() {
+            let mut search_from = 0;
+            while let Some(pos) = line[search_from..].find(*sym) {
+                let actual_pos = search_from + pos;
+                let before = if actual_pos == 0 {
+                    ' '
+                } else {
+                    line[..actual_pos].chars().last().unwrap_or(' ')
+                };
+                let after_idx = actual_pos + sym.len();
+                let after = if after_idx >= line.len() {
+                    ' '
+                } else {
+                    line[after_idx..].chars().next().unwrap_or(' ')
+                };
+                let is_word_before = before.is_alphanumeric() || before == '_';
+                let is_word_after = after.is_alphanumeric() || after == '_';
+                if !is_word_before && !is_word_after {
+                    return (idx + 1, actual_pos + 1);
+                }
+                search_from = actual_pos + sym.len();
+            }
+        }
+    }
+
+    (1, 1)
+}
+
+pub fn report_semantic_error(file: &str, source: Option<&str>, err_msg: &str) {
+    for single_err in err_msg.lines() {
+        let single_err = single_err.trim();
+        if single_err.is_empty() {
+            continue;
+        }
+        let clean_msg = if let Some(stripped) = single_err.strip_prefix("Semantic Error:") {
+            stripped.trim()
+        } else {
+            single_err
+        };
+
+        if let Some(src) = source {
+            let (line, col) = locate_semantic_error_in_source(src, single_err);
+            report_visual_error(src, file, line, col, clean_msg);
+        } else {
+            eprintln!("\n\x1b[31;1merror:\x1b[0m {}", clean_msg);
+            eprintln!("  \x1b[36;1m-->\x1b[0m {}:1:1\n", file);
+        }
     }
 }
 
@@ -76,7 +246,7 @@ fn module_import_deps(ast: &[Stmt]) -> Vec<(String, Option<Vec<String>>)> {
                 if abi.is_some()
                     || module_path
                         .first()
-                        .map_or(false, |p| p.ends_with(".h") || p.ends_with(".hpp"))
+                        .is_some_and(|p| p.ends_with(".h") || p.ends_with(".hpp"))
                 {
                     None
                 } else {
@@ -101,7 +271,7 @@ fn inject_module_exports(
         .get(dep_name)
         .ok_or_else(|| format!("Error: Module {} not found.", dep_name))?;
     let full_path = dep_name.replace('/', "::");
-    let base_name = dep_name.split('/').last().unwrap_or(dep_name);
+    let base_name = dep_name.split('/').next_back().unwrap_or(dep_name);
     let mut prefixes = vec![base_name.to_string()];
     if full_path != base_name {
         prefixes.push(full_path);
@@ -188,10 +358,13 @@ fn inject_module_exports(
                     }
                 }
                 for h in &bp_data.handles {
-                    cur_bp.handles.insert(h.clone());
+                    cur_bp.handles.insert(*h);
                 }
                 for (k, v) in &bp_data.handle_signatures {
-                    cur_bp.handle_signatures.entry(k.clone()).or_insert(v.clone());
+                    cur_bp
+                        .handle_signatures
+                        .entry(k.clone())
+                        .or_insert(v.clone());
                 }
                 for f in &bp_data.private_fields {
                     cur_bp.private_fields.insert(f.clone());
@@ -529,7 +702,7 @@ fn prune_decl_for_reachability(
 
         Decl::ExternFnDecl { name, alias, .. } => {
             let is_kept =
-                reachable.contains(name) || alias.as_ref().map_or(false, |a| reachable.contains(a));
+                reachable.contains(name) || alias.as_ref().is_some_and(|a| reachable.contains(a));
             if is_kept {
                 Some(decl.clone())
             } else {
@@ -570,10 +743,6 @@ fn prune_decl_for_reachability(
     }
 }
 
-
-
-
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if cli::handle_subcommands(&args) {
@@ -606,17 +775,22 @@ fn main() {
     } = cli::parse_cli(&args);
 
     let mut loader = match (&project_root, &manifest) {
-        (Some(root), Some(m)) => loader::ProjectLoader::new_with_project(root.clone(), Some(m.clone())),
+        (Some(root), Some(m)) => {
+            loader::ProjectLoader::new_with_project(root.clone(), Some(m.clone()))
+        }
         _ => loader::ProjectLoader::new(),
     };
     for inc in custom_includes {
         loader.include_paths.push(inc);
     }
+    loader.verbose = debug;
 
     let mut program = match loader.load(&path, target.as_deref()) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("{}", e);
+            if e.starts_with("Entry file") || e.starts_with("Target module") {
+                eprintln!("{}", e);
+            }
             std::process::exit(1);
         }
     };
@@ -657,7 +831,9 @@ fn main() {
                 continue;
             }
 
-            println!("Analyzing module: {}", module.name);
+            if debug {
+                println!("Analyzing module: {}", module.name);
+            }
             let mut analyzer = SemanticAnalyzer::new(program.global_metadata.clone());
             analyzer.target_backend = backend.clone();
             analyzer.diagnostics.current_file = module.name.clone();
@@ -691,7 +867,11 @@ fn main() {
             }
 
             if let Err(e) = analyzer.analyze(&module.ast) {
-                eprintln!("Semantic Error in module {}: {}", module.name, e);
+                let mod_file = loader
+                    .resolve_path(&module.name)
+                    .unwrap_or_else(|| format!("{}.fast", module.name));
+                let mod_source = std::fs::read_to_string(&mod_file).ok();
+                report_semantic_error(&mod_file, mod_source.as_deref(), &e);
                 std::process::exit(1);
             }
             for (k, v) in analyzer.dependency_graph {
@@ -793,7 +973,7 @@ fn main() {
             }
         }
         Err(e) => {
-            eprintln!("{}", e);
+            report_semantic_error(&path, main_analyzer.diagnostics.source_code.as_deref(), &e);
             std::process::exit(1);
         }
     }
@@ -804,7 +984,7 @@ fn main() {
     }
 
     let mut combined_fn_overloads: HashMap<String, Vec<FnSignature>> = HashMap::new();
-    for (_, mod_overloads) in &all_fn_overloads {
+    for mod_overloads in all_fn_overloads.values() {
         for (fn_name, sigs) in mod_overloads {
             combined_fn_overloads
                 .entry(fn_name.clone())
@@ -1008,27 +1188,34 @@ fn main() {
     }
 
     let check_pkg_dirs = vec![
-        manifest.as_ref().and_then(|m| project_root.as_ref().map(|r| m.get_packages_dir(r))),
+        manifest
+            .as_ref()
+            .and_then(|m| project_root.as_ref().map(|r| m.get_packages_dir(r))),
         Some(std::path::PathBuf::from("packages")),
     ];
-    for p_dir_opt in check_pkg_dirs {
-        if let Some(p_dir) = p_dir_opt {
-            if p_dir.exists() {
-                for pkg_entry in std::fs::read_dir(&p_dir).into_iter().flatten().flatten() {
-                    if pkg_entry.path().is_dir() {
-                        for f in std::fs::read_dir(pkg_entry.path()).into_iter().flatten().flatten() {
-                            let p = f.path();
-                            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                            let already_linked = clib_o_files.iter().any(|existing| existing.file_stem().and_then(|s| s.to_str()) == Some(stem))
-                                || clib_c_files.iter().any(|existing| existing.file_stem().and_then(|s| s.to_str()) == Some(stem));
-                            if !already_linked {
-                                if p.extension().and_then(|e| e.to_str()) == Some("o") {
-                                    clib_o_files.push(p);
-                                } else if p.extension().and_then(|e| e.to_str()) == Some("c") {
-                                    let o_path = p.with_extension("o");
-                                    if !o_path.exists() {
-                                        clib_c_files.push(p);
-                                    }
+    for p_dir in check_pkg_dirs.into_iter().flatten() {
+        if p_dir.exists() {
+            for pkg_entry in std::fs::read_dir(&p_dir).into_iter().flatten().flatten() {
+                if pkg_entry.path().is_dir() {
+                    for f in std::fs::read_dir(pkg_entry.path())
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                    {
+                        let p = f.path();
+                        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                        let already_linked = clib_o_files.iter().any(|existing| {
+                            existing.file_stem().and_then(|s| s.to_str()) == Some(stem)
+                        }) || clib_c_files.iter().any(|existing| {
+                            existing.file_stem().and_then(|s| s.to_str()) == Some(stem)
+                        });
+                        if !already_linked {
+                            if p.extension().and_then(|e| e.to_str()) == Some("o") {
+                                clib_o_files.push(p);
+                            } else if p.extension().and_then(|e| e.to_str()) == Some("c") {
+                                let o_path = p.with_extension("o");
+                                if !o_path.exists() {
+                                    clib_c_files.push(p);
                                 }
                             }
                         }
@@ -1048,11 +1235,7 @@ fn main() {
         let mut module_obj_files = Vec::new();
 
         for m in &program.modules {
-            let mod_safe_name = m
-                .name
-                .replace('/', "_")
-                .replace('\\', "_")
-                .replace('-', "_");
+            let mod_safe_name = m.name.replace(['/', '\\', '-'], "_");
             let mod_out_o = lib_dir
                 .join(format!("{}.o", mod_safe_name))
                 .to_string_lossy()
@@ -1090,10 +1273,7 @@ fn main() {
 
             match linker_status {
                 Ok(s) if s.success() => {
-                    println!(
-                        "Native compilation successful! Executable is {}",
-                        exe_path
-                    );
+                    println!("Native compilation successful! Executable is {}", exe_path);
                     if run_after_compile {
                         let mut run_cmd = std::process::Command::new(&exe_path);
                         run_cmd.args(&run_args);
@@ -1177,16 +1357,9 @@ fn main() {
             .ast
             .iter()
             .filter_map(|stmt| match stmt {
-                Stmt::Declaration(decl) => match decl {
-                    Decl::FnDecl { name, .. } => {
-                        if name.starts_with("@compile::") {
-                            None
-                        } else {
-                            Some(stmt.clone())
-                        }
-                    }
-                    _ => Some(stmt.clone()),
-                },
+                Stmt::Declaration(Decl::FnDecl { name, .. }) if name.starts_with("@compile::") => {
+                    None
+                }
                 _ => Some(stmt.clone()),
             })
             .collect();
@@ -1205,9 +1378,7 @@ fn main() {
         accumulated_namespaces.extend(codegen.namespaces.clone());
         accumulated_type_aliases.extend(codegen.type_aliases.clone());
         for (k, v) in codegen.primitive_impl_methods {
-            let list = accumulated_primitive_impl_methods
-                .entry(k)
-                .or_insert_with(Vec::new);
+            let list = accumulated_primitive_impl_methods.entry(k).or_default();
             for t in v {
                 if !list.contains(&t) {
                     list.push(t);
@@ -1216,10 +1387,7 @@ fn main() {
         }
         accumulated_property_access_types.extend(codegen.property_access_types.clone());
         for (k, v) in codegen.type_own_members {
-            accumulated_type_own_members
-                .entry(k)
-                .or_insert_with(std::collections::HashSet::new)
-                .extend(v);
+            accumulated_type_own_members.entry(k).or_default().extend(v);
         }
 
         let safe_name = module.name.replace('/', "_") + ".hpp";
@@ -1395,18 +1563,18 @@ fn main() {
             .arg("-Isrc/std")
             .arg("-Isrc");
         let check_pkg_includes = vec![
-            manifest.as_ref().and_then(|m| project_root.as_ref().map(|r| m.get_packages_dir(r))),
+            manifest
+                .as_ref()
+                .and_then(|m| project_root.as_ref().map(|r| m.get_packages_dir(r))),
             Some(std::path::PathBuf::from("packages")),
         ];
-        for p_dir_opt in check_pkg_includes {
-            if let Some(pkg_dir) = p_dir_opt {
-                if pkg_dir.exists() {
-                    gpp_cmd.arg(format!("-I{}", pkg_dir.display()));
-                    if let Ok(entries) = std::fs::read_dir(&pkg_dir) {
-                        for entry in entries.flatten() {
-                            if entry.path().is_dir() {
-                                gpp_cmd.arg(format!("-I{}", entry.path().display()));
-                            }
+        for pkg_dir in check_pkg_includes.into_iter().flatten() {
+            if pkg_dir.exists() {
+                gpp_cmd.arg(format!("-I{}", pkg_dir.display()));
+                if let Ok(entries) = std::fs::read_dir(&pkg_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().is_dir() {
+                            gpp_cmd.arg(format!("-I{}", entry.path().display()));
                         }
                     }
                 }
@@ -1436,7 +1604,10 @@ fn main() {
                 return;
             }
             _ => {
-                eprintln!("C++ module compilation failed! Check {} for errors.", out_path);
+                eprintln!(
+                    "C++ module compilation failed! Check {} for errors.",
+                    out_path
+                );
                 std::process::exit(1);
             }
         }
@@ -1469,19 +1640,26 @@ fn main() {
     if cfg!(windows) {
         gpp_cmd.arg("-lws2_32");
     }
+    if let Some(ref m) = manifest {
+        if let Some(ref flags) = m.package.link_flags {
+            for flag in flags {
+                gpp_cmd.arg(flag);
+            }
+        }
+    }
     let check_pkg_includes = vec![
-        manifest.as_ref().and_then(|m| project_root.as_ref().map(|r| m.get_packages_dir(r))),
+        manifest
+            .as_ref()
+            .and_then(|m| project_root.as_ref().map(|r| m.get_packages_dir(r))),
         Some(std::path::PathBuf::from("packages")),
     ];
-    for p_dir_opt in check_pkg_includes {
-        if let Some(pkg_dir) = p_dir_opt {
-            if pkg_dir.exists() {
-                gpp_cmd.arg(format!("-I{}", pkg_dir.display()));
-                if let Ok(entries) = std::fs::read_dir(&pkg_dir) {
-                    for entry in entries.flatten() {
-                        if entry.path().is_dir() {
-                            gpp_cmd.arg(format!("-I{}", entry.path().display()));
-                        }
+    for pkg_dir in check_pkg_includes.into_iter().flatten() {
+        if pkg_dir.exists() {
+            gpp_cmd.arg(format!("-I{}", pkg_dir.display()));
+            if let Ok(entries) = std::fs::read_dir(&pkg_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        gpp_cmd.arg(format!("-I{}", entry.path().display()));
                     }
                 }
             }
@@ -1508,10 +1686,12 @@ fn main() {
                 let _ = fs::remove_dir_all(&clib_dir);
             }
             if run_after_compile {
+                println!("\x1b[36;1m--- [Running {}] ---\x1b[0m\n", exe_path);
                 let mut run_cmd = std::process::Command::new(&exe_path);
                 run_cmd.args(&run_args);
                 match run_cmd.status() {
                     Ok(r_status) => {
+                        println!();
                         if let Some(code) = r_status.code() {
                             if code != 0 {
                                 std::process::exit(code);

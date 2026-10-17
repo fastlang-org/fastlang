@@ -20,7 +20,7 @@ pub mod struct_decl;
 impl Parser {
     pub fn get_handle_type(&self, t: TokenKind) -> HandleMethods {
         let name = HandleMethods::from_str(t.as_str());
-        return name;
+        name
     }
     pub fn is_valid_handle(&mut self, handles: Vec<HandleMethods>, t: TokenKind) -> bool {
         let t_h = self.get_handle_type(t);
@@ -36,15 +36,16 @@ impl Parser {
         if let TokenKind::LabelName(_) = t {
             return true;
         }
-        let mut all_settings: Vec<Setting> = Vec::new();
-        all_settings.push(Setting::Constructor);
-        all_settings.push(Setting::Public);
-        all_settings.push(Setting::Private);
-        all_settings.push(Setting::Static);
-        all_settings.push(Setting::Extends);
-        all_settings.push(Setting::Handle);
-        all_settings.push(Setting::Data);
-        all_settings.push(Setting::Label);
+        let all_settings: Vec<Setting> = vec![
+            Setting::Constructor,
+            Setting::Public,
+            Setting::Private,
+            Setting::Static,
+            Setting::Extends,
+            Setting::Handle,
+            Setting::Data,
+            Setting::Label,
+        ];
         let t_s = Setting::from_token(t);
         for s in all_settings {
             if s == t_s {

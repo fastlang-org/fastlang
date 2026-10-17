@@ -469,13 +469,22 @@ impl Parser {
         match result {
             Ok(stmt) => Ok(Some(stmt)),
             Err(err) => {
-                let err_str = format!("{}", err);
-                let err_msg: String = if err_str.starts_with("Syntax Error:") {
-                    err_str.clone()
+                let err_str = err.to_string();
+                let err_msg: String = if err_str.contains("at line ") {
+                    if err_str.starts_with("Syntax Error:") {
+                        err_str
+                    } else {
+                        format!("Syntax Error: {}", err_str)
+                    }
                 } else {
-                    format!("Syntax Error: {}", err_str)
+                    let tok = self.peek();
+                    let clean = if let Some(stripped) = err_str.strip_prefix("Syntax Error:") {
+                        stripped.trim()
+                    } else {
+                        err_str.trim()
+                    };
+                    format!("Syntax Error: {} (at line {}, column {})", clean, tok.line, tok.column)
                 };
-                eprintln!("{}", err_msg);
                 self.synchronize();
                 Err(err_msg)
             }

@@ -136,7 +136,7 @@ impl Scanner {
             "float" => Some(TokenKind::TypeFloat(32)),
             "float32" => Some(TokenKind::TypeFloat(32)),
             "float64" => Some(TokenKind::TypeFloat(64)),
-            "float128" => Some(TokenKind::TypeFloat(64)),
+            "float128" => Some(TokenKind::TypeFloat(128)),
             "bool" => Some(TokenKind::TypeBool),
             "using" => Some(TokenKind::Using),
 
@@ -710,7 +710,14 @@ impl Scanner {
                     TokenKind::Multiply
                 }
             }
-            '%' => TokenKind::Mod,
+            '%' => {
+                if let Some('=') = self.peek() {
+                    self.advance();
+                    TokenKind::ModAssign
+                } else {
+                    TokenKind::Mod
+                }
+            }
             '{' => {
                 if self.template_tag_pending {
                     self.template_tag_pending = false;

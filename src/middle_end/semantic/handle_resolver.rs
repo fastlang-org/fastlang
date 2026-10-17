@@ -84,6 +84,7 @@ pub fn resolve_handle_for_op(
 // HandleLookupResult — outcome of handle resolution
 // ─────────────────────────────────────────────────────────────────────────────
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum HandleLookupResult {
     /// Handle was found in the blueprint
     Found(BlueprintData),

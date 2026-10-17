@@ -230,6 +230,33 @@ fn test_callable_ref_auto_return() -> void {
     r_log(999); // EXPECT: log_val called with: 999
 }
 
+class CustomException -> {
+    public -> {
+        str detail = "";
+    }
+
+    constructor -> {
+        init(msg: str) -> {
+            this.detail = msg;
+        }
+    }
+
+    handle -> {
+        fn $throw() -> CustomException {
+            return this;
+        }
+        fn $display() -> str {
+            return this.detail;
+        }
+    }
+}
+
+fn test_dollar_sigil_handles() -> void {
+    CustomException ex = new CustomException("Custom error triggered");
+    println("Exception detail: ", ex.detail); // EXPECT: Exception detail: Custom error triggered
+    println("Exception display: ", ex); // EXPECT: Exception display: Custom error triggered
+}
+
 fn main() -> int32 {
     test_direct_handle_access();
     test_custom_iter_handle();
@@ -239,7 +266,9 @@ fn main() -> int32 {
     test_assign_handles_dispatch();
     test_comprehensive_access_handles();
     test_callable_ref_auto_return();
+    test_dollar_sigil_handles();
     return 0;
 }
+
 
 

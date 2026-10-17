@@ -540,8 +540,10 @@ impl Environment {
 
     pub fn resolve_type_alias(&self, name: &str) -> Option<BaseType> {
         if let Some(info) = self.symbols.get(name) {
-            if let SymbolKind::Variable { type_node, .. } = &info.kind {
-                if let BaseType::Type(inner) = type_node {
+            if let SymbolKind::Variable {
+                type_node: BaseType::Type(inner),
+                ..
+            } = &info.kind {
                     let inner_base = inner.as_ref();
                     if let BaseType::Blueprint {
                         name: next_name, ..
@@ -563,7 +565,6 @@ impl Environment {
                         }
                     }
                     return Some(inner_base.clone());
-                }
             }
         }
         if let Some(ref parent) = self.parent {

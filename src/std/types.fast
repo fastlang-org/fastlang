@@ -335,6 +335,25 @@ public impl Option<T> -> {
         fn default() -> Option<T> {
             return Option::None;
         }
+        fn partial_equal(other: Option<T>) -> bool {
+            match other {
+                Some(val2) => {
+                    match this {
+                        Some(val1) => val1 == val2,
+                        None => false,
+                    }
+                }
+                None => {
+                    match this {
+                        Some(_) => false,
+                        None => true,
+                    }
+                }
+            }
+        }
+        fn not_equal(other: Option<T>) -> bool {
+            return !(this == other);
+        }
         fn display() -> str {
             match this {
                 Some(val) => {
@@ -645,7 +664,7 @@ public impl array<T> -> {
         fn index_access(idx: int32) -> T {
             @compile{
                 //check index bounds in compile time
-                if (!typeof(idx).is_runtime() && (idx < 0 || idx >= this.len)) {
+                if (!typeof(idx).runtime() && (idx < 0 || idx >= this.len)) {
                     throw new Error("Index out of bounds");
                 }
             }(idx);
@@ -772,7 +791,7 @@ public impl array<T> -> {
     }
     fn slice(start: usize, end: usize) -> T[] {
         @compile {
-            if (!typeof(start).is_runtime() && !typeof(end).is_runtime()) {
+            if (!typeof(start).runtime() && !typeof(end).runtime()) {
                 if (start > end) {
                     throw new Error("start must be less than or equal to end");
                 }

@@ -2,6 +2,7 @@ use super::super::*;
 use std::collections::HashMap;
 
 impl SemanticAnalyzer {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn visit_class_decl(
         &mut self,
         visibility: &Visibility,
@@ -11,6 +12,7 @@ impl SemanticAnalyzer {
         public_block: &[Decl],
         private_block: &[Decl],
         static_block: &[Decl],
+        generics: &[BaseType],
         handle_block: &[Decl],
         constructor: &Option<Vec<ConstructorDecl>>,
     ) -> Result<(), String> {
@@ -23,11 +25,13 @@ impl SemanticAnalyzer {
             public_block,
             private_block,
             static_block,
+            generics,
             handle_block,
             constructor,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn visit_struct_decl(
         &mut self,
         visibility: &Visibility,
@@ -36,6 +40,7 @@ impl SemanticAnalyzer {
         public_block: &[Decl],
         private_block: &[Decl],
         static_block: &[Decl],
+        generics: &[BaseType],
         handle_block: &[Decl],
         constructor: &Option<Vec<ConstructorDecl>>,
     ) -> Result<(), String> {
@@ -48,6 +53,7 @@ impl SemanticAnalyzer {
             public_block,
             private_block,
             static_block,
+            generics,
             handle_block,
             constructor,
         )
@@ -246,11 +252,91 @@ impl SemanticAnalyzer {
         self.scope.current_machine = Some(name.to_string());
         self.enter_scope();
 
+        // Scan labels and handle block for `this { ... }` or `this.var = ...`
+        fn collect_machine_this_decls(s: &Stmt, bp: &mut BlueprintData, env: &std::rc::Rc<std::cell::RefCell<crate::middle_end::semantic::environment::Environment>>) {
+            match s {
+                Stmt::ThisBlock(inner) => {
+                    for sub in inner {
+                        if let Stmt::Declaration(Decl::VarDecl { name, type_node, .. }) = sub {
+                            bp.fields.insert(name.clone(), type_node.clone());
+                            let info = SymbolInfo {
+                                name: name.clone(),
+                                kind: SymbolKind::Variable {
+                                    type_node: type_node.clone(),
+                                    editability: Editability::Editable,
+                                    is_array: false,
+                                },
+                                visibility: Visibility::Public,
+                                dependencies: vec![],
+                                is_used: false,
+                                is_param: false,
+                                is_uninitialized: false,
+                                is_compilable: false,
+                            };
+                            let _ = env.borrow_mut().define(name.clone(), info);
+                        }
+                    }
+                }
+                Stmt::ReassignStmt {
+                    target: Expr::PropertyAccess { object, property },
+                    ..
+                } => {
+                    if matches!(&**object, Expr::This) && !bp.fields.contains_key(property) {
+                        bp.fields.insert(property.clone(), BaseType::Unknown);
+                        let info = SymbolInfo {
+                            name: property.clone(),
+                            kind: SymbolKind::Variable {
+                                type_node: BaseType::Unknown,
+                                editability: Editability::Editable,
+                                is_array: false,
+                            },
+                            visibility: Visibility::Public,
+                            dependencies: vec![],
+                            is_used: false,
+                            is_param: false,
+                            is_uninitialized: false,
+                            is_compilable: false,
+                        };
+                        let _ = env.borrow_mut().define(property.clone(), info);
+                    }
+                }
+                Stmt::Block(inner) => {
+                    for sub in inner {
+                        collect_machine_this_decls(sub, bp, env);
+                    }
+                }
+                Stmt::IfStmt { then_block, else_block, .. } => {
+                    for sub in then_block {
+                        collect_machine_this_decls(sub, bp, env);
+                    }
+                    if let Some(eb) = else_block {
+                        for sub in eb {
+                            collect_machine_this_decls(sub, bp, env);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         for label_decl in labels {
             if let Decl::LabelDecl { body, .. } = label_decl {
                 for s in body {
-                    let _ = self.visit_statement(s);
+                    collect_machine_this_decls(s, &mut bp, &self.current_env);
                 }
+            }
+        }
+        for h in handle_block {
+            if let Decl::FnDecl { body, .. } = h {
+                for s in body {
+                    collect_machine_this_decls(s, &mut bp, &self.current_env);
+                }
+            }
+        }
+
+        for label_decl in labels {
+            if let Decl::LabelDecl { name: lbl_name, body, .. } = label_decl {
+                self.visit_label_decl(lbl_name, body)?;
             }
         }
 
@@ -283,7 +369,7 @@ impl SemanticAnalyzer {
                     },
                 );
             }
-            let _ = self.visit_declaration(d);
+            self.visit_declaration(d)?;
         }
 
         self.leave_scope();
@@ -334,6 +420,7 @@ impl SemanticAnalyzer {
         public_block: &[Decl],
         private_block: &[Decl],
         static_block: &[Decl],
+        generics: &[BaseType],
         handle_block: &[Decl],
         constructor: &Option<Vec<ConstructorDecl>>,
     ) -> Result<(), String> {
@@ -399,6 +486,7 @@ impl SemanticAnalyzer {
         }
         let mut bp = BlueprintData::new(name);
         bp.is_class = is_class;
+        bp.generics = generics.iter().map(|g| g.as_str()).collect();
         if let Some(parent) = extends {
             let parent_bp = self
                 .current_env
@@ -530,6 +618,28 @@ impl SemanticAnalyzer {
             .define(name.to_string(), info)?;
 
         self.enter_scope();
+        let prev_in_generic = self.scope.in_generic_template;
+        if !generics.is_empty() {
+            self.scope.in_generic_template = true;
+        }
+        for g in generics {
+            let g_name = g.as_str();
+            let g_info = SymbolInfo {
+                name: g_name.clone(),
+                kind: SymbolKind::Variable {
+                    type_node: BaseType::Type(Box::new(g.clone())),
+                    editability: Editability::NotEditable,
+                    is_array: false,
+                },
+                visibility: Visibility::Public,
+                dependencies: vec![],
+                is_used: true,
+                is_param: false,
+                is_uninitialized: false,
+                is_compilable: false,
+            };
+            let _ = self.current_env.borrow_mut().define(g_name, g_info);
+        }
         let prev_in_class = self.scope.in_class;
         let prev_in_struct = self.scope.in_struct;
         if is_class {
@@ -589,6 +699,7 @@ impl SemanticAnalyzer {
         self.scope.in_struct = prev_in_struct;
         self.scope.current_type_name = prev_type_name;
         self.scope.current_context = prev_context;
+        self.scope.in_generic_template = prev_in_generic;
         Ok(())
     }
 }
