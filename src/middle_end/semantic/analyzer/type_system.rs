@@ -40,7 +40,9 @@ impl SemanticAnalyzer {
             | BaseType::Auto
             | BaseType::Number
             | BaseType::Unknown
-            | BaseType::GenericParam(_) => true,
+            | BaseType::GenericParam(_)
+            | BaseType::Identifier
+            | BaseType::Expr => true,
             BaseType::Array { base_type, .. } => self.is_known_type(base_type),
             BaseType::RawPointer(inner) | BaseType::Address(inner) => self.is_known_type(inner),
             BaseType::Fn { return_type, params, .. }
@@ -230,6 +232,16 @@ impl SemanticAnalyzer {
             return true;
         }
 
+        if matches!((expected, actual), (BaseType::Identifier, BaseType::Identifier) | (BaseType::Expr, BaseType::Expr)) {
+            return true;
+        }
+        if matches!(expected, BaseType::Identifier) && matches!(actual, BaseType::Str | BaseType::Array { .. } | BaseType::Identifier) {
+            return true;
+        }
+        if matches!(expected, BaseType::Expr) {
+            return true;
+        }
+
         // Generic type handling (e.g. T, U, or GenericParam)
         if matches!(expected, BaseType::GenericParam(_))
             || matches!(actual, BaseType::GenericParam(_))
@@ -357,19 +369,19 @@ impl SemanticAnalyzer {
         ) {
             return true;
         }
-        if matches!((expected, actual), (BaseType::Str, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::Char)
+        if matches!((expected, actual), (BaseType::Str, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::Char || matches!(**base_type, BaseType::GenericParam(_)) || self.is_generic_type(&base_type.as_str()) || self.scope.in_generic_template)
         {
             return true;
         }
-        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::Str) if **base_type == BaseType::Char)
+        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::Str) if **base_type == BaseType::Char || matches!(**base_type, BaseType::GenericParam(_)) || self.is_generic_type(&base_type.as_str()) || self.scope.in_generic_template)
         {
             return true;
         }
-        if matches!((expected, actual), (BaseType::UStr, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::UChar)
+        if matches!((expected, actual), (BaseType::UStr, BaseType::Array { ref base_type, .. }) if **base_type == BaseType::UChar || matches!(**base_type, BaseType::GenericParam(_)) || self.is_generic_type(&base_type.as_str()) || self.scope.in_generic_template)
         {
             return true;
         }
-        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::UStr) if **base_type == BaseType::UChar)
+        if matches!((expected, actual), (BaseType::Array { ref base_type, .. }, BaseType::UStr) if **base_type == BaseType::UChar || matches!(**base_type, BaseType::GenericParam(_)) || self.is_generic_type(&base_type.as_str()) || self.scope.in_generic_template)
         {
             return true;
         }
@@ -557,6 +569,24 @@ impl SemanticAnalyzer {
             || actual == "undefined"
             || expected.starts_with("...")
             || actual.starts_with("...")
+        {
+            return true;
+        }
+        if (expected == "str" || expected == "array<char>")
+            && (actual == "str" || actual == "array<char>" || actual == "array<T>" || actual == "T[]" || self.is_generic_type(actual) || (self.scope.in_generic_template && actual.starts_with("array<")))
+        {
+            return true;
+        }
+        if (expected == "ident" && (actual == "str" || actual == "array<char>" || actual == "ident"))
+            || (actual == "ident" && (expected == "str" || expected == "array<char>" || expected == "ident"))
+        {
+            return true;
+        }
+        if expected == "expr" || actual == "expr" {
+            return true;
+        }
+        if (actual == "str" || actual == "array<char>")
+            && (expected == "str" || expected == "array<char>" || expected == "array<T>" || expected == "T[]" || self.is_generic_type(expected) || (self.scope.in_generic_template && expected.starts_with("array<")))
         {
             return true;
         }

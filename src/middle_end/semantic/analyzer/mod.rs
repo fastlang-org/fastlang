@@ -79,6 +79,8 @@ pub struct SemanticAnalyzer {
     pub global_metadata: HashMap<String, TypeMetadata>,
     pub dependency_graph: HashMap<String, HashSet<String>>,
     pub fn_overloads: HashMap<String, Vec<FnSignature>>,
+    pub macro_overloads: HashMap<String, Vec<(Vec<Param>, BaseType, Vec<Stmt>)>>,
+    pub fn_aliases: HashMap<String, String>,
     pub machine_labels: HashMap<String, HashMap<String, HashMap<String, BaseType>>>,
     pub class_hierarchy: HashMap<String, String>,
     pub target_backend: String,
@@ -102,6 +104,8 @@ impl SemanticAnalyzer {
             dependency_graph: HashMap::new(),
             target_backend: "cpp".to_string(),
             fn_overloads: HashMap::new(),
+            macro_overloads: HashMap::new(),
+            fn_aliases: HashMap::new(),
             machine_labels: HashMap::new(),
             class_hierarchy: HashMap::new(),
         };
@@ -315,6 +319,16 @@ impl SemanticAnalyzer {
                         queue.push(init_sym);
                     }
                 if let Some(bp) = self.current_env.borrow().lookup_blueprint(&curr) {
+                    for f_ty in bp.fields.values() {
+                        let field_tname = match f_ty {
+                            BaseType::RawPointer(inner) | BaseType::Address(inner) => inner.as_str(),
+                            other => other.as_str(),
+                        };
+                        let clean_tname = field_tname.split('<').next().unwrap_or(&field_tname).trim();
+                        if !clean_tname.is_empty() && reachable.insert(clean_tname.to_string()) {
+                            queue.push(clean_tname.to_string());
+                        }
+                    }
                     for h_name in bp.handle_signatures.keys() {
                         let h_sym = format!("{}::{}", curr, h_name);
                         if reachable.insert(h_sym.clone()) {

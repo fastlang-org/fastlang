@@ -52,6 +52,15 @@ static inline void fastlang_enable_utf8_output(void)
 #endif
 #include <type_traits>
 
+#ifndef FASTLANG_HAS_DISPLAY_DEFINED
+#define FASTLANG_HAS_DISPLAY_DEFINED
+template <typename T, typename = void>
+struct has_display : std::false_type {};
+
+template <typename T>
+struct has_display<T, std::void_t<decltype(std::declval<T>().display())>> : std::true_type {};
+#endif
+
 template <typename T>
 static inline void print_single_arg(const T &val)
 {

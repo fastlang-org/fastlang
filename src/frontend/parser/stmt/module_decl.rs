@@ -117,10 +117,20 @@ impl Parser {
             _ => "C".to_string(),
         };
 
+        let mut header: Option<String> = None;
+        if let TokenKind::String(hdr) = &self.peek().kind {
+            header = Some(hdr.clone());
+            self.advance();
+        }
+
         if self.peek().kind == TokenKind::DoubleColon {
             self.advance(); // consume '::'
         } else if self.peek().kind == TokenKind::LBrace {
-            return Err("Syntax Error: Expected '::' after extern ABI (e.g. 'extern @c :: { ... }')".to_string());
+            return Err("Syntax Error: Expected '::' after extern ABI (e.g. 'extern @c \"header.h\" :: { ... }' or 'extern @c :: { ... }')".to_string());
+        }
+
+        if header.is_none() && self.peek().kind == TokenKind::LBrace {
+            eprintln!("Warning: 'extern @{} :: {{ ... }}' does not specify a target header file. It is recommended to specify the header file (e.g. 'extern @{} \"header.h\" :: {{ ... }}') to prevent header ambiguity.", abi.to_lowercase(), abi.to_lowercase());
         }
 
         if self.peek().kind == TokenKind::LBrace {
@@ -128,10 +138,39 @@ impl Parser {
             let mut decls = Vec::new();
             while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
                 if self.peek().kind == TokenKind::Set {
-                    return Err("Syntax Error: 'set' keyword is not allowed in 'extern' blocks; only 'fn' is allowed for foreign declarations.".to_string());
+                    return Err("Syntax Error: 'set' keyword is not allowed in 'extern' blocks; only 'fn', 'struct', 'enum', or 'type' are allowed for foreign declarations.".to_string());
                 } else if self.peek().kind == TokenKind::Fn {
                     let fn_decl = self.parse_extern_fn_signature(&abi)?;
                     decls.push(fn_decl);
+                } else if self.peek().kind == TokenKind::TypeStruct {
+                    let struct_decl = self.parse_struct_decl()?;
+                    if self.peek().kind == TokenKind::SemiColon {
+                        self.advance();
+                    }
+                    decls.push(struct_decl);
+                } else if self.peek().kind == TokenKind::TypeEnum {
+                    let enum_decl = self.parse_enum_decl()?;
+                    if self.peek().kind == TokenKind::SemiColon {
+                        self.advance();
+                    }
+                    decls.push(enum_decl);
+                } else if self.peek().kind == TokenKind::TypeType {
+                    self.advance(); // consume 'type'
+                    let t_name = self.get_identifier("Expected type name after 'type' in extern block")?;
+                    let type_alias = if self.peek().kind == TokenKind::Assign {
+                        self.advance();
+                        Some(self.parse_type()?)
+                    } else {
+                        None
+                    };
+                    self.consume(TokenKind::SemiColon, "Expected ';' after type declaration in extern block")?;
+                    let decl = Decl::DefineDecl {
+                        visibility: Visibility::Public,
+                        name: t_name,
+                        type_alias,
+                        value: None,
+                    };
+                    decls.push(decl);
                 } else {
                     return Err(format!(
                         "Syntax Error: Unexpected token '{:?}' in extern block",
@@ -140,7 +179,7 @@ impl Parser {
                 }
             }
             self.consume(TokenKind::RBrace, "Expected '}' at end of extern block")?;
-            Ok(Decl::ExternBlockDecl { abi, decls })
+            Ok(Decl::ExternBlockDecl { abi, header, decls })
         } else if self.peek().kind == TokenKind::Fn {
             self.parse_extern_fn_signature(&abi)
         } else {
@@ -393,7 +432,6 @@ impl Parser {
             | TokenKind::TypeEnum
             | TokenKind::TypeMethod
             | TokenKind::TypeFn
-            | TokenKind::TypeMicro
             | TokenKind::TypeLambda
             | TokenKind::TypeAuto
             | TokenKind::TypeBlock => true,
@@ -443,7 +481,6 @@ impl Parser {
             TokenKind::TypeClass => self.parse_class_decl()?,
             TokenKind::TypeStruct => self.parse_struct_decl()?,
             TokenKind::TypeEnum => self.parse_enum_decl()?,
-            TokenKind::TypeMicro => self.parse_micro_decl()?,
             TokenKind::TypeMacro => self.parse_macro_decl()?,
             TokenKind::TypeBluePrint => self.parse_blueprint_decl()?,
             TokenKind::TypeMachine => self.parse_machine_decl()?,
@@ -505,11 +542,6 @@ impl Parser {
             } => {
                 *visibility = Visibility::Public;
             }
-            Decl::MicroDecl {
-                ref mut visibility, ..
-            } => {
-                *visibility = Visibility::Public;
-            }
             Decl::MacroDecl {
                 ref mut visibility, ..
             } => {
@@ -549,9 +581,6 @@ impl Parser {
                             ref mut visibility, ..
                         }
                         | Decl::EnumDecl {
-                            ref mut visibility, ..
-                        }
-                        | Decl::MicroDecl {
                             ref mut visibility, ..
                         }
                         | Decl::MacroDecl {

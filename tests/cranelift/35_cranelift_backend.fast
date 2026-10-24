@@ -1,0 +1,25 @@
+// Test 35: Cranelift Backend Direct Compilation
+// EXPECT: Cranelift Low-Level Execution
+// EXPECT: Math result: 42
+// EXPECT: Memory Alloc and Free OK
+// EXPECT: Syscall Write OK
+
+fn calculate(a: int64, b: int64) -> int64 {
+    int64 sum = a + b;
+    return sum;
+}
+
+fn main() -> int32 {
+    @sys::write(1, "Cranelift Low-Level Execution\n", 30 as usize);
+     int64 res = calculate(20, 22);
+    if (res == 42) {
+        @sys::write(1, "Math result: 42\n", 16 as usize);
+    }
+
+    auto ptr = @sys::alloc(64 as usize);
+    @sys::free(ptr);
+    @sys::write(1, "Memory Alloc and Free OK\n", 25 as usize);
+
+    @sys::write(1, "Syscall Write OK\n", 17 as usize);
+    return 0;
+}

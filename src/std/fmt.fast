@@ -1,7 +1,7 @@
 import std::error;
 import @c "clib/fmt.h";
 
-extern @c :: {
+extern @c "clib/fmt.h" ::  {
     fn fast_print<...T>(...args: ...T) -> void;
     fn fast_println<...T>(...args: ...T) -> void;
     fn fast_input(prompt: str) -> str;
@@ -41,7 +41,9 @@ public fn input(prompt := "") -> char[] {
     if (@compile::backend() == Backend::Cpp) {
         return @c::fast_input(prompt);
     } else {
-        return @sys::read(0, 0, 0);
+        char buf[] = new char[](256);
+        @sys::read(0, buf, 256 as usize);
+        return buf;
     }
 }
 

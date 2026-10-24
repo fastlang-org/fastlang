@@ -374,13 +374,22 @@ impl Interpreter {
                     continue;
                 }
                 Stmt::Declaration(decl) => {
-                    if let Decl::MicroDecl {
+                    if let Decl::MacroDecl {
                         name, params, body, ..
                     } = decl
                     {
-                        self.micros
-                            .insert(name.clone(), (params.clone(), body.clone()));
-                        // Micros are 100% compile-time pure AST replacements.
+                        let clean_m = name.trim_start_matches('$');
+                        self.macros
+                            .entry(name.clone())
+                            .or_default()
+                            .push((params.clone(), body.clone()));
+                        if clean_m != name {
+                            self.macros
+                                .entry(clean_m.to_string())
+                                .or_default()
+                                .push((params.clone(), body.clone()));
+                        }
+                        // Macros are pure compile-time AST inlined templates.
                         // Strip their declaration from the AST so C++ codegen never generates code for them!
                         continue;
                     }
@@ -663,48 +672,87 @@ impl Interpreter {
                     new_stmts.push(stmt);
                 }
                 Stmt::CallStmt(e) | Stmt::ExpressionStmt(e) => {
-                    let micro_info = if let Expr::Call { callee, args, .. } = e {
-                        let m_name = match &**callee {
-                            Expr::Identifier(id) => Some(id.clone()),
-                            Expr::NamespaceAccess {
-                                namespace,
-                                property,
-                            } => {
-                                if let Expr::Identifier(p) = &**property {
-                                    Some(format!("{}::{}", namespace, p))
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        };
-                        if let Some(ref name) = m_name {
-                            self.micros
-                                .get(name)
-                                .cloned()
-                                .or_else(|| {
-                                    if let Some(short) = name.split("::").last() {
-                                        self.micros.get(short).cloned()
+                    let call_info = match e {
+                        Expr::MacroCall { callee, args } => {
+                            let m_name = match &**callee {
+                                Expr::Identifier(id) => Some(id.clone()),
+                                Expr::NamespaceAccess {
+                                    namespace,
+                                    property,
+                                } => {
+                                    if let Expr::Identifier(p) = &**property {
+                                        Some(format!("{}::{}", namespace, p))
                                     } else {
                                         None
                                     }
-                                })
-                                .map(|(params, body)| (params, args.clone(), body))
-                        } else {
-                            None
+                                }
+                                _ => None,
+                            };
+                            m_name.map(|name| (name, args.clone()))
                         }
+                        Expr::Call { callee, args, .. } => {
+                            let m_name = match &**callee {
+                                Expr::Identifier(id) => Some(id.clone()),
+                                Expr::NamespaceAccess {
+                                    namespace,
+                                    property,
+                                } => {
+                                    if let Expr::Identifier(p) = &**property {
+                                        Some(format!("{}::{}", namespace, p))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            };
+                            m_name.map(|name| (name, args.clone()))
+                        }
+                        _ => None,
+                    };
+
+                    let inline_info = if let Some((ref name, ref call_args)) = call_info {
+                        let candidates = vec![
+                            name.clone(),
+                            name.trim_start_matches('$').to_string(),
+                            format!("${}", name),
+                            name.split("::").last().unwrap_or(name).to_string(),
+                            name.split("::").last().unwrap_or(name).trim_start_matches('$').to_string(),
+                        ];
+                        let mut found = None;
+                        for cand in &candidates {
+                            if let Some(overloads) = self.macros.get(cand) {
+                                if let Some((params, body)) = overloads.iter().find(|(p, _)| p.len() == call_args.len()).or_else(|| overloads.first()) {
+                                    found = Some((params.clone(), call_args.clone(), body.clone()));
+                                    break;
+                                }
+                            }
+                            if let Some((params, body)) = self.micros.get(cand) {
+                                found = Some((params.clone(), call_args.clone(), body.clone()));
+                                break;
+                            }
+                        }
+                        found
                     } else {
                         None
                     };
 
-                    if let Some((params, mut call_args, body)) = micro_info {
+                    if let Some((params, mut call_args, body)) = inline_info {
                         for a in call_args.iter_mut() {
                             self.fold_expr(a)?;
                         }
                         let param_map = self.build_micro_param_map(&params, &call_args);
                         let mut expanded = Vec::new();
                         for s in &body {
-                            expanded.push(substitute_stmt(s, &param_map));
+                            if let Stmt::ReturnStmt(Some(Expr::BlockExpr { statements, final_expr })) = s {
+                                for st in statements {
+                                    expanded.push(substitute_stmt(st, &param_map));
+                                }
+                                if let Some(fe) = final_expr {
+                                    expanded.push(Stmt::ExpressionStmt(substitute_expr(fe, &param_map)));
+                                }
+                            } else {
+                                expanded.push(substitute_stmt(s, &param_map));
+                            }
                         }
                         self.evaluate_ast(&mut expanded)?;
                         new_stmts.extend(expanded);
@@ -1057,16 +1105,29 @@ impl Interpreter {
                                 (generics.clone(), params.clone(), body.clone()),
                             );
                         }
-                        Decl::MicroDecl {
+                        Decl::MacroDecl {
                             name: m_name,
                             params,
                             body,
                             ..
                         } => {
-                            self.micros.insert(
-                                format!("{}::{}", name, m_name),
-                                (params.clone(), body.clone()),
-                            );
+                            let clean_m = m_name.trim_start_matches('$');
+                            self.macros
+                                .entry(format!("{}::{}", name, m_name))
+                                .or_default()
+                                .push((params.clone(), body.clone()));
+                            self.macros
+                                .entry(format!("{}::{}", name, clean_m))
+                                .or_default()
+                                .push((params.clone(), body.clone()));
+                            self.macros
+                                .entry(m_name.clone())
+                                .or_default()
+                                .push((params.clone(), body.clone()));
+                            self.macros
+                                .entry(clean_m.to_string())
+                                .or_default()
+                                .push((params.clone(), body.clone()));
                         }
                         _ => {}
                     }
@@ -1099,34 +1160,22 @@ impl Interpreter {
                             ..
                         } => {
                             let clean_m = m_name.trim_start_matches('$');
-                            self.functions.insert(
-                                format!("{}::{}", name, m_name),
-                                (vec![], params.clone(), body.clone()),
-                            );
-                            self.functions.insert(
-                                format!("{}::{}", name, clean_m),
-                                (vec![], params.clone(), body.clone()),
-                            );
-                            self.functions
-                                .insert(m_name.clone(), (vec![], params.clone(), body.clone()));
-                            self.functions.insert(
-                                clean_m.to_string(),
-                                (vec![], params.clone(), body.clone()),
-                            );
-                        }
-                        Decl::MicroDecl {
-                            name: m_name,
-                            params,
-                            body,
-                            generics: _,
-                            ..
-                        } => {
-                            self.micros.insert(
-                                format!("{}::{}", name, m_name),
-                                (params.clone(), body.clone()),
-                            );
-                            self.micros
-                                .insert(m_name.clone(), (params.clone(), body.clone()));
+                            self.macros
+                                .entry(format!("{}::{}", name, m_name))
+                                .or_default()
+                                .push((params.clone(), body.clone()));
+                            self.macros
+                                .entry(format!("{}::{}", name, clean_m))
+                                .or_default()
+                                .push((params.clone(), body.clone()));
+                            self.macros
+                                .entry(m_name.clone())
+                                .or_default()
+                                .push((params.clone(), body.clone()));
+                            self.macros
+                                .entry(clean_m.to_string())
+                                .or_default()
+                                .push((params.clone(), body.clone()));
                         }
                         _ => {}
                     }

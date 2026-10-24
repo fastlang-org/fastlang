@@ -49,19 +49,19 @@ fn test_iife_and_anon() -> void {
     }(99);
 }
 
-micro double_val = (val: int32) -> int32 {
+macro double_val = (val: int32) -> int32 {
     return val * 2;
 };
 
-micro decrement_val = (i: mutRef<int32>) -> {
+macro decrement_val = (i: mutRef<int32>) -> {
     i -= 1;
 };
 
-micro break_it = () -> {
+macro break_it = () -> {
     break;
 };
 
-micro multi_stmt_micro = (count: mutRef<int32>) -> {
+macro multi_stmt_micro = (count: mutRef<int32>) -> {
     count += 10;
     count += 5;
 };
@@ -219,6 +219,23 @@ fn test_isolated_blocks() -> void {
     // println("outer block y: ", y); // This line would cause an error since y is out of scope
     println("outer block x: ", x); // EXPECT: outer block x: 10
 }
+
+fn alias_target_insert(s: str, t: str) -> str {
+    return s + t;
+}
+fn alias_target_compute(a: int32, b: int32) -> int32 {
+    return a + b;
+}
+fn alias_add using alias_target_insert;
+fn alias_calc using alias_target_compute;
+
+fn test_function_aliasing() -> void {
+    str res = alias_add("hello, ", "world!");
+    println("alias_add: ", res); // EXPECT: alias_add: hello, world!
+    int32 num = alias_calc(15, 25);
+    println("alias_calc: ", num); // EXPECT: alias_calc: 40
+}
+
 fn main() -> int32 {
     test_overloading_and_defaults();
     test_recursion();
@@ -229,6 +246,7 @@ fn main() -> int32 {
     test_result();
     test_implicit_returns();
     test_isolated_blocks();
+    test_function_aliasing();
     println("ALL 03_FUNCTIONS TESTS PASSED"); // EXPECT: ALL 03_FUNCTIONS TESTS PASSED
     return 0;
 }

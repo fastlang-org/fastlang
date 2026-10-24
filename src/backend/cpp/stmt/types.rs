@@ -120,6 +120,8 @@ pub(crate) fn type_to_cpp(t: &BaseType) -> String {
                 }
             }
         }
+        BaseType::Identifier => "const char*".to_string(),
+        BaseType::Expr => "auto".to_string(),
         BaseType::Object => "auto&&".to_string(),
         BaseType::Number => "auto".to_string(),
         BaseType::TypeExpr(_) => "auto".to_string(),
@@ -280,7 +282,7 @@ pub(crate) fn stmts_use_flag(stmts: &[Stmt], flag: &Flag) -> bool {
 pub(crate) fn decls_use_flag(decls: &[Decl], flag: &Flag) -> bool {
     for d in decls {
         match d {
-            Decl::FnDecl { body, .. } | Decl::MicroDecl { body, .. } => {
+            Decl::FnDecl { body, .. } => {
                 if stmts_use_flag(body, flag) {
                     return true;
                 }
@@ -349,17 +351,55 @@ pub(crate) fn collect_block_vars(stmts: &[Stmt], vars: &mut Vec<(String, BaseTyp
 }
 
 pub(crate) fn cpp_safe_name(name: &str) -> String {
-    let clean = if let Some(stripped) = name.strip_prefix('$') {
-        format!("_f_{}", stripped)
-    } else {
-        name.to_string()
-    };
-    match clean.as_str() {
+    let unescaped = name.strip_prefix('$').unwrap_or(name);
+    if let Some(stripped) = unescaped.strip_prefix('@') {
+        return format!("_fl_at_{}", stripped);
+    }
+    match unescaped {
         "throw" => "_throw".to_string(),
         "default" => "fastlang_handle_default".to_string(),
         "delete" => "_delete".to_string(),
         "new" => "_new".to_string(),
-        other => other.to_string(),
+        "switch" => "_switch".to_string(),
+        "case" => "_case".to_string(),
+        "catch" => "_catch".to_string(),
+        "try" => "_try".to_string(),
+        "class" => "_class".to_string(),
+        "struct" => "_struct".to_string(),
+        "union" => "_union".to_string(),
+        "enum" => "_enum".to_string(),
+        "template" => "_template".to_string(),
+        "typename" => "_typename".to_string(),
+        "public" => "_public".to_string(),
+        "private" => "_private".to_string(),
+        "protected" => "_protected".to_string(),
+        "virtual" => "_virtual".to_string(),
+        "static" => "_static".to_string(),
+        "const" => "_const".to_string(),
+        "auto" => "_auto".to_string(),
+        "void" => "_void".to_string(),
+        "int" => "_int".to_string(),
+        "float" => "_float".to_string(),
+        "double" => "_double".to_string(),
+        "char" => "_char".to_string(),
+        "bool" => "_bool".to_string(),
+        "while" => "_while".to_string(),
+        "for" => "_for".to_string(),
+        "do" => "_do".to_string(),
+        "if" => "_if".to_string(),
+        "else" => "_else".to_string(),
+        "return" => "_return".to_string(),
+        "break" => "_break".to_string(),
+        "continue" => "_continue".to_string(),
+        "goto" => "_goto".to_string(),
+        "sizeof" => "_sizeof".to_string(),
+        "typedef" => "_typedef".to_string(),
+        other => {
+            if name.starts_with('$') {
+                format!("_f_{}", other)
+            } else {
+                other.to_string()
+            }
+        }
     }
 }
-

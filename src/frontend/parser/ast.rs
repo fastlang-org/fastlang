@@ -79,6 +79,7 @@ pub enum BaseType {
     },
     Enum {
         name: String,
+        underlying_type: Option<Box<BaseType>>,
         variants: Vec<EnumVariant>,
         methods: Box<HashMap<String, FnType>>,
         generics: Vec<BaseType>,
@@ -150,6 +151,8 @@ pub enum BaseType {
         return_type: Box<BaseType>,
     },
     New(String),
+    Identifier,
+    Expr,
 }
 impl BaseType {
     pub fn is_numeric(&self) -> bool {
@@ -452,6 +455,8 @@ impl BaseType {
                 }
             }
             BaseType::New(t) => format!("new<{}>", t),
+            BaseType::Identifier => "ident".to_string(),
+            BaseType::Expr => "expr".to_string(),
         }
     }
     #[allow(clippy::should_implement_trait)]
@@ -495,6 +500,8 @@ impl BaseType {
                 base_type: Box::new(BaseType::Unknown),
                 size: Box::new(None),
             },
+            "ident" => BaseType::Identifier,
+            "expr" => BaseType::Expr,
             "function" => BaseType::Function {
                 name: None,
                 params: vec![],
@@ -588,6 +595,7 @@ impl BaseType {
                         let generics = g_inner.split(',').map(|p| BaseType::from_str(p.trim())).collect();
                         BaseType::Enum {
                             name: name.to_string(),
+                            underlying_type: None,
                             variants: vec![],
                             methods: Box::new(std::collections::HashMap::new()),
                             generics,
@@ -595,6 +603,7 @@ impl BaseType {
                     } else {
                         BaseType::Enum {
                             name: inner.to_string(),
+                            underlying_type: None,
                             variants: vec![],
                             methods: Box::new(std::collections::HashMap::new()),
                             generics: vec![],
@@ -621,6 +630,7 @@ impl BaseType {
                     let inner = &s[5..s.len() - 1];
                     BaseType::Enum {
                         name: inner.to_string(),
+                        underlying_type: None,
                         variants: vec![],
                         methods: Box::new(std::collections::HashMap::new()),
                         generics: vec![],
@@ -1013,6 +1023,7 @@ impl BaseType {
             }
             BaseType::Enum {
                 name,
+                underlying_type,
                 variants,
                 methods,
                 generics,
@@ -1023,6 +1034,7 @@ impl BaseType {
                     .collect();
                 BaseType::Enum {
                     name: name.clone(),
+                    underlying_type: underlying_type.clone(),
                     variants: variants.clone(),
                     methods: methods.clone(),
                     generics: substituted_generics,
@@ -1365,6 +1377,9 @@ pub enum HandleMethods {
     Arrow,
     ArrowAssign,
     FatArrow,
+    ShiftLeft,  // <<
+    ShiftRight, // >>
+    Caret,      // ^
     EqualAssign,
     Equal,
 
@@ -1398,7 +1413,6 @@ pub enum HandleMethods {
     Share,
     IsDone,
     Default,
-    Extension,
     NotFound,
 }
 impl HandleMethods {
@@ -1421,6 +1435,9 @@ impl HandleMethods {
             HandleMethods::MulReassign => Some("*="),
             HandleMethods::DivReassign => Some("/="),
             HandleMethods::ModReassign => Some("%="),
+            HandleMethods::ShiftLeft => Some("<<"),
+            HandleMethods::ShiftRight => Some(">>"),
+            HandleMethods::Caret => Some("^"),
             HandleMethods::And => Some("&&"),
             HandleMethods::Or => Some("||"),
             HandleMethods::Not => Some("!"),
@@ -1457,6 +1474,9 @@ impl HandleMethods {
             "arrow" => HandleMethods::Arrow,
             "arrow_assign" => HandleMethods::ArrowAssign,
             "fat_arrow" => HandleMethods::FatArrow,
+            "shift_left" => HandleMethods::ShiftLeft,
+            "shift_right" => HandleMethods::ShiftRight,
+            "caret" => HandleMethods::Caret,
             "equal_assign" => HandleMethods::EqualAssign,
             "equal" => HandleMethods::Equal,
             "partial_equal" => HandleMethods::PartialEqual,
@@ -1486,7 +1506,6 @@ impl HandleMethods {
             "is_done" => HandleMethods::IsDone,
             // "exit" => HandleMethods::Exit,
             "default" => HandleMethods::Default,
-            "extension" => HandleMethods::Extension,
             _ => HandleMethods::NotFound,
         }
     }
@@ -1523,6 +1542,9 @@ impl HandleMethods {
             HandleMethods::Arrow => "arrow",
             HandleMethods::ArrowAssign => "arrow_assign",
             HandleMethods::FatArrow => "fat_arrow",
+            HandleMethods::ShiftLeft => "shift_left",
+            HandleMethods::ShiftRight => "shift_right",
+            HandleMethods::Caret => "caret",
             HandleMethods::EqualAssign => "equal_assign",
             HandleMethods::Equal => "equal",
             HandleMethods::PartialEqual => "partial_equal",
@@ -1547,7 +1569,6 @@ impl HandleMethods {
             HandleMethods::Yield => "yield",
             HandleMethods::Call => "call",
             HandleMethods::Default => "default",
-            HandleMethods::Extension => "extension",
             HandleMethods::NotFound => "not_found",
         }
     }
@@ -1831,6 +1852,163 @@ pub enum Pattern {
         fields: Vec<String>,
     },
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MacroOperator {
+    At,          // @
+    Question,    // ?
+    Colon,       // :
+    DoubleColon, // ::
+    Arrow,       // ->
+    FatArrow,    // =>
+    Plus,        // +
+    Minus,       // -
+    Multiply,    // *
+    Divide,      // /
+    Mod,         // %
+    Dot,         // .
+    DotDot,      // ..
+    DotDotDot,   // ...
+    Pipe,        // |
+    Bang,        // !
+    Eq,          // ==
+    NotEq,       // !=
+    Less,        // <
+    Greater,     // >
+    LessEq,      // <=
+    GreaterEq,   // >=
+    Ampersand,   // &
+    Caret,       // ^
+    Tilde,       // ~
+    Hash,        // #
+    Dollar,      // $
+    Assign,      // =
+}
+
+impl MacroOperator {
+    pub fn from_token_kind(kind: &TokenKind) -> Option<Self> {
+        match kind {
+            TokenKind::At => Some(MacroOperator::At),
+            TokenKind::Question => Some(MacroOperator::Question),
+            TokenKind::Colon => Some(MacroOperator::Colon),
+            TokenKind::DoubleColon => Some(MacroOperator::DoubleColon),
+            TokenKind::Arrow => Some(MacroOperator::Arrow),
+            TokenKind::FatArrow => Some(MacroOperator::FatArrow),
+            TokenKind::Plus => Some(MacroOperator::Plus),
+            TokenKind::Minus => Some(MacroOperator::Minus),
+            TokenKind::Multiply => Some(MacroOperator::Multiply),
+            TokenKind::Divide => Some(MacroOperator::Divide),
+            TokenKind::Mod => Some(MacroOperator::Mod),
+            TokenKind::Dot => Some(MacroOperator::Dot),
+            TokenKind::DotDot => Some(MacroOperator::DotDot),
+            TokenKind::DotDotDot => Some(MacroOperator::DotDotDot),
+            TokenKind::Pipe => Some(MacroOperator::Pipe),
+            TokenKind::Not => Some(MacroOperator::Bang),
+            TokenKind::Eq => Some(MacroOperator::Eq),
+            TokenKind::NotEq => Some(MacroOperator::NotEq),
+            TokenKind::Less => Some(MacroOperator::Less),
+            TokenKind::Greater => Some(MacroOperator::Greater),
+            TokenKind::LessEq => Some(MacroOperator::LessEq),
+            TokenKind::GreaterEq => Some(MacroOperator::GreaterEq),
+            TokenKind::Ampersand => Some(MacroOperator::Ampersand),
+            TokenKind::Caret => Some(MacroOperator::Caret),
+            TokenKind::Tilde => Some(MacroOperator::Tilde),
+            TokenKind::Hash => Some(MacroOperator::Hash),
+            TokenKind::DollarSign => Some(MacroOperator::Dollar),
+            TokenKind::Assign => Some(MacroOperator::Assign),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MacroKeyword {
+    New,
+    If,
+    Else,
+    Match,
+    While,
+    For,
+    In,
+    Loop,
+    Do,
+    Return,
+    Break,
+    Continue,
+    Fn,
+    Import,
+    Extern,
+    Type,
+    Flag,
+    Handle,
+    Share,
+    Statement,
+    Custom(String),
+}
+
+impl MacroKeyword {
+    pub fn from_token_kind(kind: &TokenKind) -> Option<Self> {
+        match kind {
+            TokenKind::New => Some(MacroKeyword::New),
+            TokenKind::If => Some(MacroKeyword::If),
+            TokenKind::Else => Some(MacroKeyword::Else),
+            TokenKind::Match => Some(MacroKeyword::Match),
+            TokenKind::While => Some(MacroKeyword::While),
+            TokenKind::For => Some(MacroKeyword::For),
+            TokenKind::In => Some(MacroKeyword::In),
+            TokenKind::Loop => Some(MacroKeyword::Loop),
+            TokenKind::Do => Some(MacroKeyword::Do),
+            TokenKind::Return => Some(MacroKeyword::Return),
+            TokenKind::Break => Some(MacroKeyword::Break),
+            TokenKind::Continue => Some(MacroKeyword::Continue),
+            TokenKind::Fn => Some(MacroKeyword::Fn),
+            TokenKind::Import => Some(MacroKeyword::Import),
+            TokenKind::Extern => Some(MacroKeyword::Extern),
+            TokenKind::TypeType => Some(MacroKeyword::Type),
+            TokenKind::Flag => Some(MacroKeyword::Flag),
+            TokenKind::Handle => Some(MacroKeyword::Handle),
+            TokenKind::Share => Some(MacroKeyword::Share),
+            TokenKind::Statement => Some(MacroKeyword::Statement),
+            TokenKind::Identifier(id) => Some(MacroKeyword::Custom(id.clone())),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MacroDelimiter {
+    None,                           // Bare: [x : T] at definition means no enclosing brackets at call-site
+    Bracket,                        // [[x : T]] at definition means [ ... ] at call-site
+    Brace,                          // [{x : T}] or {x : T} at definition means { ... } at call-site
+    Paren,                          // [(x : T)] or (x : T) at definition means ( ... ) at call-site
+    Angle,                          // [<x : T>] or <x : T> at definition means < ... > at call-site
+    Pipe,                           // [|x : T|] or |x : T| at definition means | ... | at call-site
+    UniversalAny,                   // *[x : T] accepts all delimiters including None
+    BracketedAny,                   // ^[x : T] accepts any bracket ({}, [], (), <>) excluding None
+    Excluded(Vec<MacroDelimiter>),  // [[{}, []] ^ [x : T]] accepts any bracket except excluded ones
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MacroBlockKind {
+    HashBrace, // #{ ... }
+    Backtick,  // `[...]`
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MacroPatternItem {
+    Operator(MacroOperator),
+    Keyword(MacroKeyword),
+    LabelParam(Param),  // @[name : str] - matches @name at call-site
+    HashParam(Param),   // #[name : str] - matches #name at call-site
+    ParamGroup {
+        delimiter: MacroDelimiter,
+        params: Vec<Param>,
+    },
+    BlockParam {
+        kind: MacroBlockKind,
+        param: Param,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     VarDecl {
@@ -1872,14 +2050,6 @@ pub enum Decl {
         return_type: Option<BaseType>,
         statements: Vec<Stmt>,
     },
-    MicroDecl {
-        visibility: Visibility,
-        name: String,
-        generics: Option<Vec<String>>,
-        params: Vec<Param>,
-        return_type: Option<BaseType>,
-        body: Vec<Stmt>,
-    },
     ObjectDecl {
         visibility: Visibility,
         name: String,
@@ -1910,6 +2080,7 @@ pub enum Decl {
         is_handle_impl: bool,
         methods: Vec<Decl>,
         handle_block: Vec<Decl>,
+        static_block: Vec<Decl>,
     },
 
     StructDecl {
@@ -1926,6 +2097,7 @@ pub enum Decl {
     EnumDecl {
         visibility: Visibility,
         name: String,
+        underlying_type: Option<BaseType>,
         generics: Vec<BaseType>,
         handles: Vec<HandleMethods>,
         handle_block: Vec<Decl>,
@@ -1941,6 +2113,11 @@ pub enum Decl {
         return_type: BaseType,
         body: Vec<Stmt>,
     },
+    FnAliasDecl {
+        visibility: Visibility,
+        name: String,
+        target: String,
+    },
     ExternFnDecl {
         abi: String,
         name: String,
@@ -1951,6 +2128,7 @@ pub enum Decl {
     },
     ExternBlockDecl {
         abi: String,
+        header: Option<String>,
         decls: Vec<Decl>,
     },
     LabelDecl {
@@ -1986,6 +2164,7 @@ pub enum Decl {
         name: String,
         generics: Vec<BaseType>,
         params: Vec<Param>,
+        pattern: Vec<MacroPatternItem>,
         body: Vec<Stmt>,
     },
     CompileDecl {
@@ -2146,14 +2325,17 @@ pub enum EnumVariantPayload {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumVariant {
     pub name: String,
+    pub discriminant: Option<Expr>,
     pub payload: EnumVariantPayload,
     pub data_type: Option<BaseType>,
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlueprintShareDirective {
     pub target_field: String,
     pub condition: Option<Expr>,
+    pub then_block: Option<Vec<Stmt>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

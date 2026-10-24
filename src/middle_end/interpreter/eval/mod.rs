@@ -244,6 +244,7 @@ pub struct Interpreter {
     pub env: InterpreterEnv,
     pub functions: HashMap<String, (Vec<BaseType>, Vec<Param>, Vec<Stmt>)>,
     pub micros: HashMap<String, (Vec<Param>, Vec<Stmt>)>,
+    pub macros: HashMap<String, Vec<(Vec<Param>, Vec<Stmt>)>>,
     pub var_types: HashMap<String, String>,
     pub current_env: Option<Rc<RefCell<Environment>>>,
     pub fn_overloads: HashMap<String, Vec<FnSignature>>,
@@ -266,6 +267,7 @@ impl Interpreter {
             env: InterpreterEnv::new(),
             functions: HashMap::new(),
             micros: HashMap::new(),
+            macros: HashMap::new(),
             var_types: HashMap::new(),
             current_env: None,
             fn_overloads: HashMap::new(),
@@ -300,10 +302,14 @@ impl Interpreter {
                     } => {
                         self.functions.insert(name, (generics, params, body));
                     }
-                    Decl::MicroDecl {
+                    Decl::MacroDecl {
                         name, params, body, ..
                     } => {
-                        self.micros.insert(name, (params, body));
+                        let clean_m = name.trim_start_matches('$');
+                        self.macros.entry(name.clone()).or_default().push((params.clone(), body.clone()));
+                        if clean_m != name {
+                            self.macros.entry(clean_m.to_string()).or_default().push((params, body));
+                        }
                     }
                     Decl::ImplDecl {
                         target,
@@ -366,16 +372,21 @@ impl Interpreter {
                                         (generics.clone(), params.clone(), body.clone()),
                                     );
                                 }
-                                Decl::MicroDecl {
+                                Decl::MacroDecl {
                                     name: m_name,
                                     params,
                                     body,
                                     ..
                                 } => {
-                                    self.micros.insert(
-                                        format!("{}::{}", name, m_name),
-                                        (params.clone(), body.clone()),
-                                    );
+                                    let clean_m = m_name.trim_start_matches('$');
+                                    self.macros.entry(format!("{}::{}", name, m_name)).or_default().push((params.clone(), body.clone()));
+                                    if clean_m != m_name {
+                                        self.macros.entry(format!("{}::{}", name, clean_m)).or_default().push((params.clone(), body.clone()));
+                                    }
+                                    self.macros.entry(m_name.clone()).or_default().push((params.clone(), body.clone()));
+                                    if clean_m != m_name {
+                                        self.macros.entry(clean_m.to_string()).or_default().push((params, body));
+                                    }
                                 }
                                 _ => {}
                             }
@@ -403,6 +414,14 @@ impl Interpreter {
                                     ..
                                 } => {
                                     let clean_m = m_name.trim_start_matches('$');
+                                    self.macros.entry(format!("{}::{}", name, m_name)).or_default().push((params.clone(), body.clone()));
+                                    if clean_m != m_name {
+                                        self.macros.entry(format!("{}::{}", name, clean_m)).or_default().push((params.clone(), body.clone()));
+                                    }
+                                    self.macros.entry(m_name.clone()).or_default().push((params.clone(), body.clone()));
+                                    if clean_m != m_name {
+                                        self.macros.entry(clean_m.to_string()).or_default().push((params.clone(), body.clone()));
+                                    }
                                     self.functions.insert(
                                         format!("{}::{}", name, m_name),
                                         (vec![], params.clone(), body.clone()),
@@ -419,19 +438,6 @@ impl Interpreter {
                                         clean_m.to_string(),
                                         (vec![], params.clone(), body.clone()),
                                     );
-                                }
-                                Decl::MicroDecl {
-                                    name: m_name,
-                                    params,
-                                    body,
-                                    generics: _,
-                                    ..
-                                } => {
-                                    self.micros.insert(
-                                        format!("{}::{}", name, m_name),
-                                        (params.clone(), body.clone()),
-                                    );
-                                    self.micros.insert(m_name.clone(), (params, body));
                                 }
                                 _ => {}
                             }
@@ -459,10 +465,6 @@ impl Interpreter {
                 self.functions
                     .entry(name.clone())
                     .or_insert_with(|| (vec![], params.clone(), body.clone()));
-            } else if let SymbolKind::Micro { params, body, .. } = &info.kind {
-                self.micros
-                    .entry(name.clone())
-                    .or_insert_with(|| (params.clone(), body.clone()));
             }
         }
         if let Some(ref parent) = env.parent {

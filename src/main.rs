@@ -265,6 +265,7 @@ fn inject_module_exports(
     imports: &Option<Vec<String>>,
     envs: &HashMap<String, Rc<RefCell<Environment>>>,
     all_fn_overloads: &HashMap<String, HashMap<String, Vec<FnSignature>>>,
+    all_macro_overloads: &HashMap<String, HashMap<String, Vec<(Vec<Param>, BaseType, Vec<Stmt>)>>>,
     debug: bool,
 ) -> Result<(), String> {
     let env = envs
@@ -308,8 +309,9 @@ fn inject_module_exports(
     }
     if let Some(mod_overloads) = all_fn_overloads.get(dep_name) {
         for (fn_name, sigs) in mod_overloads {
+            let without_dollar = fn_name.trim_start_matches('$');
             let should_inject = match imports {
-                Some(selected) => selected.contains(fn_name),
+                Some(selected) => selected.contains(fn_name) || selected.contains(&without_dollar.to_string()),
                 None => true,
             };
             if should_inject {
@@ -318,15 +320,51 @@ fn inject_module_exports(
                     .entry(fn_name.clone())
                     .or_default()
                     .extend(sigs.clone());
-                if !fn_name.contains("::") {
-                    for prefix in &prefixes {
-                        let qual = format!("{}::{}", prefix, fn_name);
-                        analyzer
-                            .fn_overloads
-                            .entry(qual)
-                            .or_default()
-                            .extend(sigs.clone());
-                    }
+                if without_dollar != fn_name {
+                    analyzer
+                        .fn_overloads
+                        .entry(without_dollar.to_string())
+                        .or_default()
+                        .extend(sigs.clone());
+                }
+                for prefix in &prefixes {
+                    let qual = format!("{}::{}", prefix, fn_name);
+                    analyzer
+                        .fn_overloads
+                        .entry(qual)
+                        .or_default()
+                        .extend(sigs.clone());
+                }
+            }
+        }
+    }
+    if let Some(mod_macro_overloads) = all_macro_overloads.get(dep_name) {
+        for (m_name, overloads) in mod_macro_overloads {
+            let without_dollar = m_name.trim_start_matches('$');
+            let should_inject = match imports {
+                Some(selected) => selected.contains(m_name) || selected.contains(&without_dollar.to_string()),
+                None => true,
+            };
+            if should_inject {
+                analyzer
+                    .macro_overloads
+                    .entry(m_name.clone())
+                    .or_default()
+                    .extend(overloads.clone());
+                if without_dollar != m_name {
+                    analyzer
+                        .macro_overloads
+                        .entry(without_dollar.to_string())
+                        .or_default()
+                        .extend(overloads.clone());
+                }
+                for prefix in &prefixes {
+                    let qual = format!("{}::{}", prefix, m_name);
+                    analyzer
+                        .macro_overloads
+                        .entry(qual)
+                        .or_default()
+                        .extend(overloads.clone());
                 }
             }
         }
@@ -621,6 +659,7 @@ fn prune_decl_for_reachability(
             is_handle_impl,
             methods,
             handle_block,
+            static_block,
         } => {
             // If the target type is reachable, keep its impl methods
             if reachable.contains(target) {
@@ -639,7 +678,19 @@ fn prune_decl_for_reachability(
                 .cloned()
                 .collect();
 
-            if filter_methods.is_empty() && handle_block.is_empty() {
+            let filter_statics: Vec<Decl> = static_block
+                .iter()
+                .filter(|d| match d {
+                    Decl::FnDecl { name: m_name, .. } => {
+                        let full_m = format!("{}::{}", target, m_name);
+                        reachable.contains(&full_m) || reachable.contains(m_name)
+                    }
+                    _ => true,
+                })
+                .cloned()
+                .collect();
+
+            if filter_methods.is_empty() && handle_block.is_empty() && filter_statics.is_empty() {
                 None
             } else {
                 Some(Decl::ImplDecl {
@@ -648,6 +699,7 @@ fn prune_decl_for_reachability(
                     is_handle_impl: *is_handle_impl,
                     methods: filter_methods,
                     handle_block: handle_block.clone(),
+                    static_block: filter_statics,
                 })
             }
         }
@@ -655,6 +707,7 @@ fn prune_decl_for_reachability(
         Decl::EnumDecl {
             visibility,
             name,
+            underlying_type,
             generics,
             handles,
             handle_block,
@@ -672,6 +725,7 @@ fn prune_decl_for_reachability(
             Some(Decl::EnumDecl {
                 visibility: visibility.clone(),
                 name: name.clone(),
+                underlying_type: underlying_type.clone(),
                 generics: generics.clone(),
                 handles: handles.clone(),
                 handle_block: handle_block.clone(),
@@ -710,7 +764,7 @@ fn prune_decl_for_reachability(
             }
         }
 
-        Decl::ExternBlockDecl { abi, decls } => {
+        Decl::ExternBlockDecl { abi, header, decls } => {
             let filtered_decls: Vec<Decl> = decls
                 .iter()
                 .filter_map(|d| {
@@ -722,6 +776,7 @@ fn prune_decl_for_reachability(
             } else {
                 Some(Decl::ExternBlockDecl {
                     abi: abi.clone(),
+                    header: header.clone(),
                     decls: filtered_decls,
                 })
             }
@@ -736,6 +791,14 @@ fn prune_decl_for_reachability(
                 } else {
                     None
                 }
+            }
+        }
+
+        Decl::FnAliasDecl { name, target, .. } => {
+            if is_main_file || reachable.contains(name) || reachable.contains(target) {
+                Some(decl.clone())
+            } else {
+                None
             }
         }
 
@@ -813,6 +876,7 @@ fn main() {
 
     let mut envs: HashMap<String, Rc<RefCell<Environment>>> = HashMap::new();
     let mut all_fn_overloads: HashMap<String, HashMap<String, Vec<FnSignature>>> = HashMap::new();
+    let mut all_macro_overloads: HashMap<String, HashMap<String, Vec<(Vec<Param>, BaseType, Vec<Stmt>)>>> = HashMap::new();
     let mut analyzed_modules = HashSet::new();
 
     let mut all_module_dep_graphs: HashMap<String, HashSet<String>> = HashMap::new();
@@ -844,12 +908,13 @@ fn main() {
                     &None,
                     &envs,
                     &all_fn_overloads,
+                    &all_macro_overloads,
                     debug,
                 )
                 .ok();
             }
             if envs.contains_key("std") && module.name != "std" {
-                inject_module_exports(&mut analyzer, "std", &None, &envs, &all_fn_overloads, debug)
+                inject_module_exports(&mut analyzer, "std", &None, &envs, &all_fn_overloads, &all_macro_overloads, debug)
                     .ok();
             }
             for (dep_name, imports) in &deps {
@@ -859,6 +924,7 @@ fn main() {
                     imports,
                     &envs,
                     &all_fn_overloads,
+                    &all_macro_overloads,
                     debug,
                 ) {
                     eprintln!("{}", e);
@@ -882,6 +948,7 @@ fn main() {
             }
             envs.insert(module.name.clone(), analyzer.current_env);
             all_fn_overloads.insert(module.name.clone(), analyzer.fn_overloads.clone());
+            all_macro_overloads.insert(module.name.clone(), analyzer.macro_overloads.clone());
             analyzed_modules.insert(module.name.clone());
             progressed = true;
         }
@@ -920,6 +987,7 @@ fn main() {
             &None,
             &envs,
             &all_fn_overloads,
+            &all_macro_overloads,
             debug,
         )
         .ok();
@@ -931,6 +999,7 @@ fn main() {
             &None,
             &envs,
             &all_fn_overloads,
+            &all_macro_overloads,
             debug,
         )
         .ok();
@@ -944,6 +1013,7 @@ fn main() {
             imports,
             &envs,
             &all_fn_overloads,
+            &all_macro_overloads,
             debug,
         ) {
             eprintln!("{}", e);
@@ -1322,6 +1392,10 @@ fn main() {
     let mut accumulated_struct_field_types = initial_codegen.struct_field_types;
     let mut accumulated_namespaces = initial_codegen.namespaces;
     let mut accumulated_type_aliases = initial_codegen.type_aliases;
+    let mut accumulated_enum_types = initial_codegen.enum_types;
+    let mut accumulated_payload_enum_types = initial_codegen.payload_enum_types;
+    let mut accumulated_simple_enum_types = initial_codegen.simple_enum_types;
+    let mut accumulated_enum_variant_defs = initial_codegen.enum_variant_defs;
 
     let base_std_names = [
         "std/types",
@@ -1372,11 +1446,19 @@ fn main() {
         codegen.struct_field_types = accumulated_struct_field_types.clone();
         codegen.namespaces = accumulated_namespaces.clone();
         codegen.type_aliases = accumulated_type_aliases.clone();
+        codegen.enum_types = accumulated_enum_types.clone();
+        codegen.payload_enum_types = accumulated_payload_enum_types.clone();
+        codegen.simple_enum_types = accumulated_simple_enum_types.clone();
+        codegen.enum_variant_defs = accumulated_enum_variant_defs.clone();
         let module_cpp = codegen.generate(&filtered_ast, false, false);
         accumulated_machine_types.extend(codegen.machine_types.clone());
         accumulated_struct_field_types.extend(codegen.struct_field_types.clone());
         accumulated_namespaces.extend(codegen.namespaces.clone());
         accumulated_type_aliases.extend(codegen.type_aliases.clone());
+        accumulated_enum_types.extend(codegen.enum_types.clone());
+        accumulated_payload_enum_types.extend(codegen.payload_enum_types.clone());
+        accumulated_simple_enum_types.extend(codegen.simple_enum_types.clone());
+        accumulated_enum_variant_defs.extend(codegen.enum_variant_defs.clone());
         for (k, v) in codegen.primitive_impl_methods {
             let list = accumulated_primitive_impl_methods.entry(k).or_default();
             for t in v {
@@ -1464,6 +1546,10 @@ fn main() {
     main_codegen.struct_field_types = accumulated_struct_field_types;
     main_codegen.namespaces = accumulated_namespaces;
     main_codegen.type_aliases = accumulated_type_aliases;
+    main_codegen.enum_types = accumulated_enum_types;
+    main_codegen.payload_enum_types = accumulated_payload_enum_types;
+    main_codegen.simple_enum_types = accumulated_simple_enum_types;
+    main_codegen.enum_variant_defs = accumulated_enum_variant_defs;
     let pruned_main_ast = if is_module_project {
         program.main_ast.clone()
     } else {

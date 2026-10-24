@@ -146,23 +146,24 @@ impl Parser {
                         );
                     } else {
                         used_settings.push(Setting::Static);
-                        static_block_ast = self.parse_field_block(&mut meta, Visibility::Private)?;
+                        static_block_ast = self.parse_field_block(&mut meta, Visibility::Static)?;
                         continue;
                     }
                 }
             } else {
-                print!(
-                    "DEBUG:[ Invalid field found : '{}' ] or already used in this scope at , that is not allow in the array typed scope to use it \n\t - use custom typed scope with enable some setting it will work if it valid",
-                    t.as_str()
-                );
-                return Err(
-                    format!(
-                        "Syntax Error: Invalid field [{}] declaration at line {}, column {}",
-                        t.as_str(),
-                        self.peek().line,
-                        self.peek().column
-                    ).to_string()
-                );
+                let stmt = self.parse_statement(ScopeType::Block)?;
+                if let Some(Stmt::Declaration(decl)) = stmt {
+                    public_block_ast.push(decl);
+                } else {
+                    return Err(
+                        format!(
+                            "Syntax Error: Invalid field [{}] declaration at line {}, column {}",
+                            t.as_str(),
+                            self.peek().line,
+                            self.peek().column
+                        )
+                    );
+                }
             }
         }
         self.consume(TokenKind::RBrace, "Expected '}' to close struct body")?;

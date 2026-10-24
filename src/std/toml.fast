@@ -1,0 +1,186 @@
+// FastLang Standard Library: Pure TOML Parser & Document Model
+import std::types;
+import std::document;
+import std::time;
+
+using types;
+using document;
+using time;
+
+public blueprint TomlEntry = {
+    char key[];
+    char value[];
+    char section[];
+}
+
+public blueprint TomlDocument = {
+    char raw[];
+    TomlEntry entries[];
+}
+
+public impl TomlDocument -> {
+    fn get(k: str) -> str {
+        for (int32 i = 0; i < this.entries.len; i = i + 1) {
+            if (this.entries[i].key == k) {
+                return this.entries[i].value;
+            }
+        }
+        return "";
+    }
+
+    fn get_in_section(sec: str, k: str) -> str {
+        for (int32 i = 0; i < this.entries.len; i = i + 1) {
+            if (this.entries[i].section == sec && this.entries[i].key == k) {
+                return this.entries[i].value;
+            }
+        }
+        return "";
+    }
+
+    fn select(sec: str) -> TomlDocument {
+        TomlDocument sub;
+        sub.raw = "";
+        sub.entries = [];
+        for (int32 i = 0; i < this.entries.len; i = i + 1) {
+            if (this.entries[i].section == sec) {
+                sub.entries = sub.entries + [this.entries[i]];
+            }
+        }
+        return sub;
+    }
+
+    fn set(k: str, v: str) -> void {
+        for (int32 i = 0; i < this.entries.len; i = i + 1) {
+            if (this.entries[i].key == k) {
+                this.entries[i].value = v;
+                return;
+            }
+        }
+        TomlEntry e;
+        e.key = k;
+        e.value = v;
+        e.section = "";
+        this.entries = this.entries + [e];
+    }
+
+    fn as_str() -> str {
+        return this.raw;
+    }
+
+    fn render() -> str {
+        if (this.raw.len > 0) {
+            return this.raw;
+        }
+        str out = "";
+        for (int32 i = 0; i < this.entries.len; i = i + 1) {
+            if (this.entries[i].section.len > 0) {
+                out = out + "[" + this.entries[i].section + "]\n";
+            }
+            out = out + this.entries[i].key + " = \"" + this.entries[i].value + "\"\n";
+        }
+        return out;
+    }
+
+    handle -> {
+        fn display() -> str {
+            return this.as_str();
+        }
+    }
+}
+
+fn trim_toml_str(s: str) -> str {
+    int32 start = 0;
+    while (start < s.len && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n')) {
+        start = start + 1;
+    }
+    int32 end = s.len;
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r' || s[end - 1] == '\n')) {
+        end = end - 1;
+    }
+    str out = "";
+    for (int32 i = start; i < end; i = i + 1) {
+        out = out + s[i];
+    }
+    return out;
+}
+
+fn unquote_toml_str(s: str) -> str {
+    str t = trim_toml_str(s);
+    if (t.len >= 2 && ((t[0] == '"' && t[t.len - 1] == '"') || (t[0] == '\'' && t[t.len - 1] == '\''))) {
+        str inner = "";
+        for (int32 i = 1; i < t.len - 1; i = i + 1) {
+            inner = inner + t[i];
+        }
+        return inner;
+    }
+    return t;
+}
+
+public fn toml(input: str) -> TomlDocument {
+    TomlDocument doc;
+    doc.raw = input;
+    doc.entries = [];
+
+    str curr_section = "";
+    int32 i = 0;
+    int32 len = input.len;
+
+    while (i < len) {
+        // Read line
+        str line = "";
+        while (i < len && input[i] != '\n') {
+            if (input[i] != '\r') {
+                line = line + input[i];
+            }
+            i = i + 1;
+        }
+        if (i < len && input[i] == '\n') {
+            i = i + 1;
+        }
+
+        str clean_line = trim_toml_str(line);
+        if (clean_line.len == 0 || clean_line[0] == '#') {
+            continue;
+        }
+
+        // Section header [section]
+        if (clean_line[0] == '[' && clean_line[clean_line.len - 1] == ']') {
+            str sec = "";
+            for (int32 s_idx = 1; s_idx < clean_line.len - 1; s_idx = s_idx + 1) {
+                sec = sec + clean_line[s_idx];
+            }
+            curr_section = trim_toml_str(sec);
+            continue;
+        }
+
+        // Key = Value
+        int32 eq_pos = -1;
+        for (int32 c_idx = 0; c_idx < clean_line.len; c_idx = c_idx + 1) {
+            if (clean_line[c_idx] == '=') {
+                eq_pos = c_idx;
+                break;
+            }
+        }
+
+        if (eq_pos > 0) {
+            str k = "";
+            for (int32 ki = 0; ki < eq_pos; ki = ki + 1) {
+                k = k + clean_line[ki];
+            }
+            str v = "";
+            for (int32 vi = eq_pos + 1; vi < clean_line.len; vi = vi + 1) {
+                v = v + clean_line[vi];
+            }
+
+            TomlEntry entry;
+            entry.key = trim_toml_str(k);
+            entry.value = unquote_toml_str(v);
+            entry.section = curr_section;
+            doc.entries = doc.entries + [entry];
+        }
+    }
+
+    return doc;
+}
+
+

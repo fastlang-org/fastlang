@@ -344,110 +344,6 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    pub(crate) fn visit_micro_decl(
-        &mut self,
-        visibility: &Visibility,
-        name: &str,
-        params: &[Param],
-        return_type: &Option<BaseType>,
-        body: &[Stmt],
-        generics: &Option<Vec<String>>,
-    ) -> Result<(), String> {
-        for s in body {
-            if matches!(s, Stmt::Declaration(Decl::VarDecl { .. } | Decl::DestructureDecl { .. } | Decl::ObjectDestructureDecl { .. } | Decl::ArrayDecl { .. })) {
-                return Err(format!(
-                    "Semantic Error: Local variable declarations are forbidden inside micro '{}'.",
-                    name
-                ));
-            }
-        }
-        let prev_in_generic = self.scope.in_generic_template;
-        if generics.as_ref().map(|g| !g.is_empty()).unwrap_or(false) {
-            self.scope.in_generic_template = true;
-        }
-        let gen_types: Vec<BaseType> = generics
-            .as_ref()
-            .map(|v| v.iter().map(|s| BaseType::from_str(s)).collect())
-            .unwrap_or_default();
-        let micro_info = SymbolInfo {
-            name: name.to_string(),
-            kind: SymbolKind::Micro {
-                params: params.to_vec(),
-                generics: gen_types,
-                body: body.to_vec(),
-            },
-            visibility: visibility.clone(),
-            dependencies: vec![],
-            is_used: false,
-            is_param: false,
-            is_uninitialized: false,
-            is_compilable: true,
-        };
-        self.current_env
-            .borrow_mut()
-            .define_or_update(name.to_string(), micro_info);
-
-        let prev_flags = self.active_flags.clone();
-        let prev_return = self.active_return_type.clone();
-        let prev_context = self.scope.current_context.clone();
-        self.scope.current_context = Some(name.to_string());
-        self.active_flags.insert(Flag::HasBreak);
-        self.active_flags.insert(Flag::HasContinue);
-        self.active_flags.insert(Flag::HasThrow);
-        self.active_flags.insert(Flag::HasYield);
-        self.active_flags.insert(Flag::HasLeave);
-        self.active_flags.insert(Flag::HasReturn);
-        self.enter_scope();
-        for p in params {
-            let param_info = SymbolInfo {
-                name: p.name.clone(),
-                kind: SymbolKind::Variable {
-                    type_node: self.resolve_type(&p.type_node),
-                    editability: Editability::Editable,
-                    is_array: false,
-                },
-                visibility: Visibility::Public,
-                dependencies: vec![],
-                is_used: false,
-                is_param: true,
-                is_uninitialized: false,
-                is_compilable: false,
-            };
-            self.current_env
-                .borrow_mut()
-                .define(p.name.clone(), param_info)?;
-        }
-
-        let mut resolved_method_return = return_type.clone();
-        if let Some(BaseType::TypeExpr(expr)) = return_type {
-            let ret_t = self.visit_expression(expr)?;
-            let clean_t = if ret_t.starts_with("type<") && ret_t.ends_with('>') {
-                strip_wrapper(&ret_t, "type<").to_string()
-            } else {
-                ret_t
-            };
-            if generics.as_ref().map(|v| v.iter().any(|g| g == &clean_t)).unwrap_or(false)
-                || clean_t == "generic"
-                || clean_t.starts_with("Generic")
-            {
-                return Err("Semantic Error: 'typeof' is currently not supported for generic or runtime types. This feature will be supported in future versions.".to_string());
-            }
-            resolved_method_return = Some(BaseType::from_str(&clean_t));
-        }
-        self.active_return_type = resolved_method_return;
-
-        for s in body {
-            self.visit_statement(s)?;
-        }
-        self.leave_scope();
-
-        self.active_flags = prev_flags;
-        self.active_return_type = prev_return;
-        self.scope.current_context = prev_context;
-        self.scope.in_generic_template = prev_in_generic;
-        Ok(())
-    }
-
     pub(crate) fn visit_macro_decl(
         &mut self,
         name: &str,
@@ -455,6 +351,25 @@ impl SemanticAnalyzer {
         body: &[Stmt],
         visibility: &Visibility,
     ) -> Result<(), String> {
+        for s in body {
+            if matches!(s, Stmt::Declaration(Decl::VarDecl { .. } | Decl::DestructureDecl { .. } | Decl::ObjectDestructureDecl { .. } | Decl::ArrayDecl { .. })) {
+                return Err(format!(
+                    "Semantic Error: Local variable declarations are forbidden inside macro '{}'.",
+                    name
+                ));
+            }
+        }
+        self.macro_overloads
+            .entry(name.to_string())
+            .or_default()
+            .push((params.to_vec(), BaseType::Void, body.to_vec()));
+        let without_dollar = name.trim_start_matches('$');
+        if without_dollar != name {
+            self.macro_overloads
+                .entry(without_dollar.to_string())
+                .or_default()
+                .push((params.to_vec(), BaseType::Void, body.to_vec()));
+        }
         let info = SymbolInfo {
             name: name.to_string(),
             kind: SymbolKind::Macro {
@@ -489,14 +404,6 @@ impl SemanticAnalyzer {
                     *fn_name = format!("{}::{}", name, fn_name);
                     *visibility = Visibility::Public;
                 }
-                Decl::MicroDecl {
-                    name: m_name,
-                    visibility,
-                    ..
-                } => {
-                    *m_name = format!("{}::{}", name, m_name);
-                    *visibility = Visibility::Public;
-                }
                 Decl::MacroDecl {
                     name: m_name,
                     visibility,
@@ -526,6 +433,10 @@ impl SemanticAnalyzer {
                 ];
                 for alias in aliases {
                     if alias != *m_name {
+                        self.macro_overloads
+                            .entry(alias.clone())
+                            .or_default()
+                            .push((params.clone(), BaseType::Void, body.clone()));
                         let alias_info = SymbolInfo {
                             name: alias.clone(),
                             kind: SymbolKind::Macro {

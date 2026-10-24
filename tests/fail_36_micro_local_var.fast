@@ -1,7 +1,7 @@
 // Fail Test: Local variable declaration is strictly forbidden inside micro bodies
 import std;
 
-micro invalid_micro = (val: int32) -> void {
+macro invalid_micro = (val: int32) -> void {
     int32 x = 10;
 };
 

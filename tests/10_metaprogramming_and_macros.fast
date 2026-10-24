@@ -22,6 +22,15 @@ fn forward_variadic<...T>(...args: ...T) -> void {
     print_variadic(...args);
 }
 
+macro @dependency #{ffi : str} -> {
+    println("Macro dependency invoked: ", ffi);
+}
+
+@dependency {
+[dependency]
+sqlite3 = "3.36.0"
+}
+
 fn main() -> int32 {
     UserID id = 42;
     println(id); // EXPECT: 42
@@ -103,6 +112,17 @@ fn main() -> int32 {
     if (typeof(m) == mutRef<int32>) {
         println("mutRef generic type check passed"); // EXPECT: mutRef generic type check passed
     }
+    ident my_id = "test_var";
+    if (my_id.as_str() == "test_var") {
+        println("ident as_str passed"); // EXPECT: ident as_str passed
+    }
+
+    str t_sample = "[dependencies]\nsqlite3 = \"3.36.0\"\n";
+    str deps[] = @compile::toml(t_sample).select("dependencies");
+    if (deps.len > 0) {
+        println("comptime toml select passed: ", deps[0]); // EXPECT: comptime toml select passed: sqlite3 = "3.36.0"
+    }
+
     println("ALL 10_METAPROGRAMMING TESTS PASSED"); // EXPECT: ALL 10_METAPROGRAMMING TESTS PASSED
     return 0;
 }

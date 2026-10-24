@@ -11,6 +11,7 @@ pub struct CodeGenerator {
     pub(crate) enum_types: HashSet<String>,
     pub(crate) payload_enum_types: HashSet<String>,
     pub(crate) simple_enum_types: HashSet<String>,
+    pub(crate) enum_variant_defs: HashMap<String, Vec<EnumVariant>>,
     pub(crate) pointer_vars: HashSet<String>,
     pub(crate) raw_pointer_vars: HashSet<String>,
     pub(crate) address_vars: HashSet<String>,
@@ -30,6 +31,7 @@ pub struct CodeGenerator {
     pub(crate) current_block_vars: Option<HashSet<String>>,
     pub(crate) variadic_packs: HashSet<String>,
     pub(crate) target_impl_methods: HashMap<String, Vec<Decl>>,
+    pub(crate) target_static_methods: HashMap<String, Vec<Decl>>,
     pub(crate) target_handle_methods: HashMap<String, Vec<Decl>>,
     pub(crate) c_includes: HashSet<String>,
     pub(crate) iter_counter: usize,
@@ -40,6 +42,8 @@ pub struct CodeGenerator {
     pub(crate) namespaces: HashSet<String>,
     pub(crate) forward_declared_fns: HashSet<String>,
     pub(crate) type_aliases: HashMap<String, String>,
+    pub(crate) foreign_types: HashSet<String>,
+    pub(crate) in_static_block: bool,
 }
 
 impl Default for CodeGenerator {
@@ -58,6 +62,7 @@ impl CodeGenerator {
             used_enums: HashSet::from(["Option".to_string(), "Result".to_string()]),
             payload_enum_types: HashSet::new(),
             simple_enum_types: HashSet::new(),
+            enum_variant_defs: HashMap::new(),
             pointer_vars: HashSet::new(),
             raw_pointer_vars: HashSet::new(),
             address_vars: HashSet::new(),
@@ -77,6 +82,7 @@ impl CodeGenerator {
             current_block_vars: None,
             variadic_packs: HashSet::new(),
             target_impl_methods: HashMap::new(),
+            target_static_methods: HashMap::new(),
             target_handle_methods: HashMap::new(),
             c_includes: HashSet::new(),
             iter_counter: 0,
@@ -86,6 +92,8 @@ impl CodeGenerator {
             namespaces: HashSet::new(),
             forward_declared_fns: HashSet::new(),
             type_aliases: HashMap::new(),
+            foreign_types: HashSet::new(),
+            in_static_block: false,
         }
     }
 
@@ -118,6 +126,9 @@ impl CodeGenerator {
                         "mul" => Some("*"),
                         "div" => Some("/"),
                         "mod" => Some("%"),
+                        "shift_left" => Some("<<"),
+                        "shift_right" => Some(">>"),
+                        "caret" => Some("^"),
                         "partial_equal" => Some("=="),
                         "not_equal" => Some("!="),
                         "greater_than" => Some(">"),
@@ -268,7 +279,12 @@ impl CodeGenerator {
             let resolved_type = self.resolve_alias(&cpp_type);
 
             if is_this && self.in_primitive_impl {
-                self.current_primitive_target.clone()
+                if let Some(ref cur) = self.current_primitive_target {
+                    if targets.contains(cur) {
+                        return Some(cur.clone());
+                    }
+                }
+                None
             } else if targets
                 .iter()
                 .any(|t| t == &cpp_type || t == &resolved_type)
@@ -462,9 +478,20 @@ impl CodeGenerator {
                     .insert(clean_name, fields_map.clone());
                 self.struct_field_types.insert(name.clone(), fields_map);
             } else if let Stmt::Declaration(Decl::EnumDecl {
-                name, handle_block, ..
+                name,
+                handle_block,
+                variants,
+                ..
             }) = stmt
             {
+                self.enum_types.insert(name.clone());
+                self.enum_variant_defs.insert(name.clone(), variants.clone());
+                let has_payload = variants.iter().any(|v| !matches!(v.payload, EnumVariantPayload::None));
+                if has_payload {
+                    self.payload_enum_types.insert(name.clone());
+                } else {
+                    self.simple_enum_types.insert(name.clone());
+                }
                 self.target_handle_methods
                     .entry(name.clone())
                     .or_default()
@@ -482,9 +509,14 @@ impl CodeGenerator {
                 is_handle_impl,
                 methods,
                 handle_block,
+                static_block,
                 ..
             }) = stmt
             {
+                self.target_static_methods
+                    .entry(target.clone())
+                    .or_default()
+                    .extend(static_block.clone());
                 if target == "type" {
                     continue;
                 }
@@ -613,6 +645,48 @@ impl CodeGenerator {
             {
                 let cpp_t = type_to_cpp(return_type);
                 self.fn_return_types.insert(name.clone(), cpp_t);
+            } else if let Stmt::Declaration(Decl::FnAliasDecl { name, target, .. }) = stmt {
+                if let Some(cpp_t) = self.fn_return_types.get(target).cloned() {
+                    self.fn_return_types.insert(name.clone(), cpp_t);
+                }
+            } else if let Stmt::Declaration(Decl::ExternBlockDecl { header, decls, .. }) = stmt {
+                if let Some(hdr) = header {
+                    let inc = if hdr.starts_with('<') || hdr.starts_with('"') {
+                        format!("#include {}", hdr)
+                    } else {
+                        format!("#include <{}>", hdr)
+                    };
+                    self.c_includes.insert(inc);
+                }
+                for d in decls {
+                    match d {
+                        Decl::StructDecl { name, public_block, private_block, .. } => {
+                            self.foreign_types.insert(name.clone());
+                            let mut fields_map = HashMap::new();
+                            for f in public_block.iter().chain(private_block.iter()) {
+                                if let Decl::VarDecl { name: f_name, type_node, .. } = f {
+                                    fields_map.insert(f_name.clone(), type_to_cpp(type_node));
+                                }
+                            }
+                            let clean_name = if let Some(idx) = name.find('<') {
+                                name[..idx].to_string()
+                            } else {
+                                name.clone()
+                            };
+                            self.struct_field_types.insert(clean_name, fields_map.clone());
+                            self.struct_field_types.insert(name.clone(), fields_map);
+                        }
+                        Decl::EnumDecl { name, .. } => {
+                            self.foreign_types.insert(name.clone());
+                        }
+                        Decl::DefineDecl { name, type_alias: Some(t), .. } => {
+                            self.foreign_types.insert(name.clone());
+                            let cpp_t = type_to_cpp(t);
+                            self.type_aliases.insert(name.clone(), cpp_t);
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -660,6 +734,7 @@ impl CodeGenerator {
             (Vec<BaseType>, BlueprintDef, Option<BlueprintShareDirective>),
         > = HashMap::new();
         let mut impls: HashMap<String, Vec<Decl>> = HashMap::new();
+        let mut impl_statics: HashMap<String, Vec<Decl>> = HashMap::new();
         let mut blueprint_handles: HashMap<String, Vec<Decl>> = HashMap::new();
         #[allow(clippy::type_complexity)]
         let mut primitive_impls: Vec<(String, Vec<BaseType>, Vec<Decl>, Vec<Decl>)> = Vec::new();
@@ -690,6 +765,7 @@ impl CodeGenerator {
                 is_handle_impl,
                 methods,
                 handle_block,
+                static_block,
             }) = stmt
             {
                 if target == "type" {
@@ -724,6 +800,10 @@ impl CodeGenerator {
                             .entry(target.clone())
                             .or_default()
                             .extend(handle_block.clone());
+                        impl_statics
+                            .entry(target.clone())
+                            .or_default()
+                            .extend(static_block.clone());
                     }
                 }
             }
@@ -763,7 +843,9 @@ impl CodeGenerator {
                     }
                 }
                 Stmt::Declaration(Decl::StructDecl { name, .. }) => {
-                    self.emit(&format!("struct {};", name));
+                    if !self.foreign_types.contains(name) {
+                        self.emit(&format!("struct {};", name));
+                    }
                 }
                 _ => {}
             }
@@ -804,6 +886,15 @@ impl CodeGenerator {
                 let cpp_t = type_to_cpp(t);
                 self.type_aliases.insert(name.clone(), cpp_t);
                 self.visit_statement(stmt);
+            }
+        }
+
+        // Emit simple enum declarations (without payload) before blueprint bodies so enums can be used as blueprint fields
+        for stmt in &flat_ast {
+            if let Stmt::Declaration(Decl::EnumDecl { variants, .. }) = stmt {
+                if !variants.iter().any(|v| !matches!(v.payload, EnumVariantPayload::None)) {
+                    self.visit_statement(stmt);
+                }
             }
         }
 
@@ -901,6 +992,11 @@ impl CodeGenerator {
                         self.emit(&format!("{name}() = default;"));
                         self.emit(&format!("{name}(const {name}& other) : ptr(other.ptr), {target_f}(other.{target_f}) {{"));
                         self.indent_level += 1;
+                        for f in &fields {
+                            if f.name != "ptr" && f.name != *target_f {
+                                self.emit(&format!("this->{} = other.{};", f.name, f.name));
+                            }
+                        }
                         if !cond_str.is_empty() {
                             self.emit(&format!("{cond_str}{{"));
                             self.indent_level += 1;
@@ -908,6 +1004,11 @@ impl CodeGenerator {
                         self.emit(&format!(
                             "if (this->{target_f}) {{ this->{target_f}->share(); }}"
                         ));
+                        if let Some(ref stmts) = sd.then_block {
+                            for stmt in stmts {
+                                self.visit_statement(stmt);
+                            }
+                        }
                         if !cond_str.is_empty() {
                             self.indent_level -= 1;
                             self.emit("}");
@@ -921,6 +1022,11 @@ impl CodeGenerator {
                         self.indent_level += 1;
                         self.emit("this->ptr = other.ptr;");
                         self.emit(&format!("this->{target_f} = other.{target_f};"));
+                        for f in &fields {
+                            if f.name != "ptr" && f.name != *target_f {
+                                self.emit(&format!("this->{} = other.{};", f.name, f.name));
+                            }
+                        }
                         if !cond_str.is_empty() {
                             self.emit(&format!("{cond_str}{{"));
                             self.indent_level += 1;
@@ -928,6 +1034,11 @@ impl CodeGenerator {
                         self.emit(&format!(
                             "if (this->{target_f}) {{ this->{target_f}->share(); }}"
                         ));
+                        if let Some(ref stmts) = sd.then_block {
+                            for stmt in stmts {
+                                self.visit_statement(stmt);
+                            }
+                        }
                         if !cond_str.is_empty() {
                             self.indent_level -= 1;
                             self.emit("}");
@@ -1033,6 +1144,14 @@ impl CodeGenerator {
                         }
                     }
 
+                    if let Some(statics) = impl_statics.get(&name) {
+                        for s in statics {
+                            self.in_static_block = true;
+                            self.visit_declaration(s);
+                            self.in_static_block = false;
+                        }
+                    }
+
                     if let Some(handles) = blueprint_handles.get(&name) {
                         for h in handles {
                             if let Decl::FnDecl {
@@ -1071,6 +1190,9 @@ impl CodeGenerator {
                                     "mul" => Some("*"),
                                     "div" => Some("/"),
                                     "mod" => Some("%"),
+                                    "shift_left" => Some("<<"),
+                                    "shift_right" => Some(">>"),
+                                    "caret" => Some("^"),
                                     "partial_equal" => Some("=="),
                                     "not_equal" => Some("!="),
                                     "less_than" => Some("<"),
@@ -1197,6 +1319,15 @@ impl CodeGenerator {
 
                     self.indent_level -= 1;
                     self.emit("};");
+                    if let Some(handles) = blueprint_handles.get(&name) {
+                        let has_display_handle = handles.iter().any(|h| matches!(h, Decl::FnDecl { name: fn_name, .. } if fn_name == "display"));
+                        if has_display_handle && generics.is_empty() {
+                            self.emit(&format!(
+                                "inline char* fastlang_as_str(const {}& obj) {{ return const_cast<{}&>(obj).display(); }}",
+                                name, name
+                            ));
+                        }
+                    }
                     self.current_class_name = old_class_name;
                 }
                 _ => {
@@ -1214,12 +1345,16 @@ impl CodeGenerator {
         // 1. Emit all top-level types (Enums, Structs, Classes, Machines, Arrays) first
         for stmt in ast {
             match &stmt {
-                Stmt::Declaration(Decl::EnumDecl { .. })
-                | Stmt::Declaration(Decl::ClassDecl { .. })
+                Stmt::Declaration(Decl::ClassDecl { .. })
                 | Stmt::Declaration(Decl::StructDecl { .. })
                 | Stmt::Declaration(Decl::ArrayDecl { .. })
                 | Stmt::Declaration(Decl::MachineDecl { .. }) => {
                     self.visit_statement(stmt);
+                }
+                Stmt::Declaration(Decl::EnumDecl { variants, .. }) => {
+                    if variants.iter().any(|v| !matches!(v.payload, EnumVariantPayload::None)) {
+                        self.visit_statement(stmt);
+                    }
                 }
                 _ => {}
             }
@@ -1300,9 +1435,9 @@ impl CodeGenerator {
         for stmt in ast {
             match &stmt {
                 Stmt::Declaration(Decl::FnDecl { .. })
+                | Stmt::Declaration(Decl::FnAliasDecl { .. })
                 | Stmt::Declaration(Decl::ExternFnDecl { .. })
                 | Stmt::Declaration(Decl::ExternBlockDecl { .. })
-                | Stmt::Declaration(Decl::MicroDecl { .. })
                 | Stmt::Declaration(Decl::MacroDecl { .. })
                 | Stmt::Declaration(Decl::NamespaceDecl { .. })
                 | Stmt::Declaration(Decl::BlockDecl { .. })
@@ -1344,6 +1479,11 @@ impl CodeGenerator {
                             }
                         }
                     }
+                }
+                Stmt::ExpressionStmt(expr) | Stmt::CallStmt(expr) => {
+                    let code = self.visit_expression(expr);
+                    self.emit(&format!("static const int __fl_init_{} = ([]() {{ {}; return 0; }})();", self.yield_counter, code));
+                    self.yield_counter += 1;
                 }
                 _ => {}
             }
@@ -1489,9 +1629,9 @@ impl CodeGenerator {
                         | Stmt::Declaration(Decl::BlueprintDecl { .. })
                         | Stmt::Declaration(Decl::ImplDecl { .. })
                         | Stmt::Declaration(Decl::FnDecl { .. })
+                        | Stmt::Declaration(Decl::FnAliasDecl { .. })
                         | Stmt::Declaration(Decl::NamespaceDecl { .. })
-                        | Stmt::Declaration(Decl::MicroDecl { .. })
-                        | Stmt::Declaration(Decl::MacroDecl { .. })
+                                | Stmt::Declaration(Decl::MacroDecl { .. })
                         | Stmt::Declaration(Decl::Import { .. }) => {}
                         _ => {
                             self.visit_statement(stmt);

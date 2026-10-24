@@ -33,7 +33,8 @@ impl Parser {
             while self.peek().kind != TokenKind::RBrace && !self.is_at_end() {
                 if self.peek().kind == TokenKind::Share {
                     self.advance(); // consume 'share'
-                    let target_name = self.get_identifier("Expected target field name after 'share'")?;
+                    let target_name =
+                        self.get_identifier("Expected target field name after 'share'")?;
                     let condition = if self.peek().kind == TokenKind::If {
                         self.advance(); // consume 'if'
                         self.consume(TokenKind::LParen, "Expected '(' after 'if'")?;
@@ -43,12 +44,26 @@ impl Parser {
                     } else {
                         None
                     };
+                    let then_block = if self.peek().kind == TokenKind::LBrace {
+                        self.advance(); // consume '{'
+                        let mut stmts = Vec::new();
+                        while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
+                            if let Some(stmt) = self.parse_statement(ScopeType::Block)? {
+                                stmts.push(stmt);
+                            }
+                        }
+                        self.consume(TokenKind::RBrace, "Expected '}' at end of share then-block")?;
+                        Some(stmts)
+                    } else {
+                        None
+                    };
                     if self.peek().kind == TokenKind::SemiColon {
                         self.advance();
                     }
                     share_directive = Some(BlueprintShareDirective {
                         target_field: target_name,
                         condition,
+                        then_block,
                     });
                     continue;
                 }
@@ -246,10 +261,29 @@ impl Parser {
             false
         };
 
+        let is_static_impl = if !is_handle_impl && self.peek().kind == TokenKind::Static {
+            self.advance(); // consume 'static'
+            self.consume(
+                TokenKind::For,
+                "Expected 'for' after 'static' in 'impl static for'",
+            )?;
+            true
+        } else {
+            false
+        };
+
         let target = self.parse_impl_target_name()?;
         let mut target_generics = Vec::new();
         if self.peek().kind == TokenKind::Less {
             self.parse_generics(&mut target_generics)?;
+            for g in &target_generics {
+                let gen_name = match g {
+                    BaseType::GenericParam(n) => n.clone(),
+                    BaseType::Blueprint { name, .. } => name.clone(),
+                    _ => g.as_str(),
+                };
+                self.current_generics.insert(gen_name);
+            }
         }
 
         let target_type = if target.ends_with('*') {
@@ -308,12 +342,57 @@ impl Parser {
             if self.peek().kind == TokenKind::SemiColon {
                 self.consume(TokenKind::SemiColon, "Expected ';'")?;
             }
+            for g in &target_generics {
+                let gen_name = match g {
+                    BaseType::GenericParam(n) => n.clone(),
+                    BaseType::Blueprint { name, .. } => name.clone(),
+                    _ => g.as_str(),
+                };
+                self.current_generics.remove(&gen_name);
+            }
             return Ok(Decl::ImplDecl {
                 target,
                 target_generics,
                 is_handle_impl: true,
                 methods: Vec::new(),
                 handle_block,
+                static_block: Vec::new(),
+            });
+        }
+
+        if is_static_impl {
+            if self.peek().kind == TokenKind::Arrow {
+                self.advance();
+            }
+            self.consume(TokenKind::LBrace, "Expected '{'")?;
+            let mut static_block: Vec<Decl> = Vec::new();
+            while self.peek().kind != TokenKind::RBrace && !self.is_at_end() {
+                let stmt = self.parse_statement(ScopeType::Impl)?;
+                if let Some(Stmt::Declaration(s)) = stmt {
+                    static_block.push(s);
+                } else if stmt.is_some() {
+                    return Err("Expected declaration inside impl static block".to_string());
+                }
+            }
+            self.consume(TokenKind::RBrace, "Expected '}'")?;
+            if self.peek().kind == TokenKind::SemiColon {
+                self.consume(TokenKind::SemiColon, "Expected ';'")?;
+            }
+            for g in &target_generics {
+                let gen_name = match g {
+                    BaseType::GenericParam(n) => n.clone(),
+                    BaseType::Blueprint { name, .. } => name.clone(),
+                    _ => g.as_str(),
+                };
+                self.current_generics.remove(&gen_name);
+            }
+            return Ok(Decl::ImplDecl {
+                target,
+                target_generics,
+                is_handle_impl: false,
+                methods: Vec::new(),
+                handle_block: Vec::new(),
+                static_block,
             });
         }
 
@@ -324,6 +403,7 @@ impl Parser {
 
         let mut methods: Vec<Decl> = Vec::new();
         let mut handle_block: Vec<Decl> = Vec::new();
+        let mut static_block: Vec<Decl> = Vec::new();
 
         while self.peek().kind != TokenKind::RBrace && !self.is_at_end() {
             if self.peek().kind == TokenKind::Handle {
@@ -332,6 +412,31 @@ impl Parser {
                 let allowed = self.get_allowed_handle(&target_type)?;
                 let hdls = self.parse_handle_body(&mut used_handles, allowed)?;
                 handle_block.extend(hdls);
+            } else if self.peek().kind == TokenKind::Static {
+                self.advance(); // consume 'static'
+                if self.peek().kind == TokenKind::Arrow {
+                    self.advance();
+                }
+                if self.peek().kind == TokenKind::LBrace {
+                    self.advance(); // consume '{'
+                    while self.peek().kind != TokenKind::RBrace && !self.is_at_end() {
+                        let stmt = self.parse_statement(ScopeType::Impl)?;
+                        if let Some(Stmt::Declaration(s)) = stmt {
+                            static_block.push(s);
+                        } else if stmt.is_some() {
+                            return Err("Expected declaration inside static block".to_string());
+                        }
+                    }
+                    self.consume(TokenKind::RBrace, "Expected '}' to close static block")?;
+                    if self.peek().kind == TokenKind::SemiColon {
+                        self.advance();
+                    }
+                } else if self.peek().kind == TokenKind::Fn {
+                    let fn_decl = self.parse_fn_decl()?;
+                    static_block.push(fn_decl);
+                } else {
+                    return Err("Expected '{' or 'fn' after 'static' in impl block".to_string());
+                }
             } else {
                 let stmt = self.parse_statement(ScopeType::Impl)?;
                 if let Some(Stmt::Declaration(s)) = stmt {
@@ -371,7 +476,7 @@ impl Parser {
                 vars: std::collections::HashMap::new(),
                 variants: None,
             });
-        for m in &methods {
+        for m in methods.iter().chain(static_block.iter()) {
             if let Decl::FnDecl {
                 name,
                 generics,
@@ -418,12 +523,22 @@ impl Parser {
             }
         }
 
+        for g in &target_generics {
+            let gen_name = match g {
+                BaseType::GenericParam(n) => n.clone(),
+                BaseType::Blueprint { name, .. } => name.clone(),
+                _ => g.as_str(),
+            };
+            self.current_generics.remove(&gen_name);
+        }
+
         Ok(Decl::ImplDecl {
             target,
             target_generics,
             is_handle_impl: false,
             methods,
             handle_block,
+            static_block,
         })
     }
 }

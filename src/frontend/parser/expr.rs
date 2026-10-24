@@ -340,12 +340,10 @@ impl Parser {
             TokenKind::TypeMethod
             | TokenKind::TypeFn
             | TokenKind::Fn
-            | TokenKind::TypeMicro
             | TokenKind::TypeLambda
             | TokenKind::TypeFunction => {
                 let kind_str = match &self.peek().kind {
                     TokenKind::TypeMethod => "method",
-                    TokenKind::TypeMicro => "micro",
                     TokenKind::TypeLambda => "lambda",
                     TokenKind::TypeFunction => "function",
                     _ => "fn",
@@ -524,6 +522,7 @@ impl Parser {
                     }),
                     _ => Ok(BaseType::Enum {
                         name: obj_name,
+                        underlying_type: None,
                         variants: Vec::new(),
                         methods: Box::new(std::collections::HashMap::new()),
                         generics,
@@ -534,6 +533,12 @@ impl Parser {
                 self.advance();
                 if self.current_generics.contains(&n) {
                     return Ok(BaseType::GenericParam(n));
+                }
+                if n == "ident" {
+                    return Ok(BaseType::Identifier);
+                }
+                if n == "expr" {
+                    return Ok(BaseType::Expr);
                 }
                 if n == "num" {
                     if self.peek().kind == TokenKind::DoubleColon {
@@ -575,8 +580,14 @@ impl Parser {
                     let methods = Box::new(meta.methods.clone());
 
                     if meta.ty.as_str().starts_with("enum") {
+                        let underlying_type = if let BaseType::Enum { ref underlying_type, .. } = meta.ty {
+                            underlying_type.clone()
+                        } else {
+                            None
+                        };
                         Ok(BaseType::Enum {
                             name: n.clone(),
+                            underlying_type,
                             variants: meta.variants.unwrap_or(Vec::new()),
                             methods,
                             generics,
@@ -685,6 +696,11 @@ impl Parser {
                 continue;
             }
 
+            if let Some(macro_expr) = self.try_match_infix_macro(lhs.clone(), min_bp)? {
+                lhs = macro_expr;
+                continue;
+            }
+
             if let Some((left_bp, right_bp)) = self.infix_binding_power() {
                 if left_bp < min_bp {
                     break;
@@ -724,6 +740,9 @@ impl Parser {
     }
 
     pub(crate) fn parse_prefix(&mut self) -> Result<Expr, String> {
+        if let Some(prefix_macro) = self.try_match_prefix_macro()? {
+            return Ok(prefix_macro);
+        }
         match &self.peek().kind.clone() {
             // --- Literals ---
             TokenKind::Super => {
@@ -1263,6 +1282,22 @@ impl Parser {
                         return false;
                     }
                 }
+                TokenKind::ShiftRight => {
+                    if depth >= 2 {
+                        depth -= 2;
+                    } else {
+                        depth -= 1;
+                    }
+                    if depth == 0 {
+                        if let Some(next_tok) = self.tokens.get(self.current + offset + 1) {
+                            return matches!(
+                                next_tok.kind,
+                                TokenKind::LParen | TokenKind::Dot | TokenKind::DoubleColon
+                            );
+                        }
+                        return false;
+                    }
+                }
                 TokenKind::SemiColon
                 | TokenKind::LBrace
                 | TokenKind::RBrace
@@ -1286,6 +1321,31 @@ impl Parser {
                 TokenKind::Less => depth += 1,
                 TokenKind::Greater => {
                     depth -= 1;
+                    if depth == 0 {
+                        if let Some(next_tok) = self.tokens.get(self.current + offset + 1) {
+                            return matches!(
+                                next_tok.kind,
+                                TokenKind::RParen
+                                    | TokenKind::RBracket
+                                    | TokenKind::RBrace
+                                    | TokenKind::SemiColon
+                                    | TokenKind::Comma
+                                    | TokenKind::Eq
+                                    | TokenKind::NotEq
+                                    | TokenKind::And
+                                    | TokenKind::Or
+                                    | TokenKind::Colon
+                            );
+                        }
+                        return false;
+                    }
+                }
+                TokenKind::ShiftRight => {
+                    if depth >= 2 {
+                        depth -= 2;
+                    } else {
+                        depth -= 1;
+                    }
                     if depth == 0 {
                         if let Some(next_tok) = self.tokens.get(self.current + offset + 1) {
                             return matches!(
@@ -1499,7 +1559,7 @@ impl Parser {
             // --- Namespace Access: lhs::identifier ---
             TokenKind::DoubleColon => {
                 self.advance();
-                let prop = self.get_handle_identifier("Expected member name after '::'")?;
+                let prop = self.get_member_identifier("Expected member name after '::'")?;
 
                 let namespace = if let Expr::Identifier(n) = lhs {
                     n
@@ -1600,10 +1660,45 @@ impl Parser {
                     }
                 }
                 self.consume(TokenKind::RBracket, "Expected ']' after array index")?;
-                Ok(Expr::IndexAccess {
-                    object: Box::new(lhs),
-                    indices,
-                })
+
+                let matching_bracket_macro = if let Expr::Identifier(ref id) = lhs {
+                    self.macro_patterns.iter().find(|d| {
+                        if let Decl::MacroDecl { name, pattern, .. } = d {
+                            let matches_name = name == id
+                                || name.trim_start_matches('$') == id.trim_start_matches('$');
+                            if !matches_name {
+                                return false;
+                            }
+                            if let Some(MacroPatternItem::ParamGroup { delimiter, .. }) = pattern.first() {
+                                matches!(
+                                    delimiter,
+                                    MacroDelimiter::Bracket
+                                        | MacroDelimiter::UniversalAny
+                                        | MacroDelimiter::BracketedAny
+                                        | MacroDelimiter::Excluded(_)
+                                )
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    }).cloned()
+                } else {
+                    None
+                };
+
+                if let Some(Decl::MacroDecl { name, .. }) = matching_bracket_macro {
+                    Ok(Expr::MacroCall {
+                        callee: Box::new(Expr::Identifier(name)),
+                        args: indices,
+                    })
+                } else {
+                    Ok(Expr::IndexAccess {
+                        object: Box::new(lhs),
+                        indices,
+                    })
+                }
             }
 
             // --- TypeName { ... } instantiation ---
@@ -1633,6 +1728,7 @@ impl Parser {
         match &self.peek().kind {
             TokenKind::Pipe => Some((1, 2)),
             TokenKind::Or => Some((1, 2)),  // left-associative
+            TokenKind::Caret => Some((2, 3)), // bitwise XOR: between pipe and and
             TokenKind::And => Some((3, 4)), // left-associative
             TokenKind::Eq => Some((5, 6)),  // left-associative
             TokenKind::NotEq => Some((5, 6)),
@@ -1640,6 +1736,8 @@ impl Parser {
             TokenKind::Greater => Some((7, 8)),
             TokenKind::LessEq => Some((7, 8)),
             TokenKind::GreaterEq => Some((7, 8)),
+            TokenKind::ShiftLeft => Some((8, 9)),  // shifts: higher than comparisons, lower than add
+            TokenKind::ShiftRight => Some((8, 9)),
             TokenKind::Plus => Some((9, 10)), // left-associative
             TokenKind::Minus => Some((9, 10)),
             TokenKind::Multiply => Some((11, 12)),
@@ -1680,6 +1778,9 @@ impl Parser {
             TokenKind::And => "&&".to_string(),
             TokenKind::Or => "||".to_string(),
             TokenKind::Pipe => "|".to_string(),
+            TokenKind::Caret => "^".to_string(),
+            TokenKind::ShiftLeft => "<<".to_string(),
+            TokenKind::ShiftRight => ">>".to_string(),
             other => format!("{:?}", other),
         }
     }
@@ -1837,5 +1938,150 @@ impl Parser {
         self.consume(TokenKind::RBrace, "Expected '}' to close foreign block")?;
 
         Ok(Expr::ForeignBlock { kind, chunks })
+    }
+
+    pub(crate) fn try_match_infix_macro(&mut self, lhs: Expr, min_bp: u8) -> Result<Option<Expr>, String> {
+        let op_opt = MacroOperator::from_token_kind(&self.peek().kind);
+        let Some(current_op) = op_opt else {
+            return Ok(None);
+        };
+
+        let candidate_macros: Vec<Decl> = self.macro_patterns
+            .iter()
+            .filter(|d| {
+                if let Decl::MacroDecl { pattern, .. } = d {
+                    pattern.len() >= 3
+                        && matches!(&pattern[0], MacroPatternItem::ParamGroup { .. })
+                        && matches!(&pattern[1], MacroPatternItem::Operator(op) if *op == current_op)
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect();
+
+        if candidate_macros.is_empty() {
+            return Ok(None);
+        }
+
+        let bp = match current_op {
+            MacroOperator::DotDot | MacroOperator::DotDotDot => 3,
+            MacroOperator::Question => 1,
+            MacroOperator::Plus | MacroOperator::Minus => 11,
+            MacroOperator::Multiply | MacroOperator::Divide | MacroOperator::Mod => 12,
+            _ => 3,
+        };
+
+        if bp < min_bp {
+            return Ok(None);
+        }
+
+        self.advance();
+
+        let macro_name = if let Decl::MacroDecl { name, .. } = &candidate_macros[0] {
+            name.clone()
+        } else {
+            "macro".to_string()
+        };
+
+        let mut args = vec![lhs];
+        let first_rhs = self.parse_expr(bp)?;
+        args.push(first_rhs);
+
+        let supports_extra_params = candidate_macros.iter().any(|d| {
+            if let Decl::MacroDecl { pattern, .. } = d {
+                if let Some(MacroPatternItem::ParamGroup { params, .. }) = pattern.get(2) {
+                    params.len() > 1
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
+
+        if supports_extra_params && self.peek().kind == TokenKind::Comma {
+            let look = self.peek_ahead(1).map(|t| &t.kind);
+            if look.is_some() && !matches!(look, Some(TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace | TokenKind::SemiColon)) {
+                self.advance();
+                let second_rhs = self.parse_expr(bp)?;
+                args.push(second_rhs);
+            }
+        }
+
+        Ok(Some(Expr::MacroCall {
+            callee: Box::new(Expr::Identifier(macro_name)),
+            args,
+        }))
+    }
+
+    pub(crate) fn try_match_prefix_macro(&mut self) -> Result<Option<Expr>, String> {
+        if let TokenKind::LabelName(lbl) = &self.peek().kind.clone() {
+            if self.peek_ahead(1).map(|t| &t.kind) == Some(&TokenKind::DoubleColon)
+                || lbl == "@compile"
+                || lbl == "@sys"
+            {
+                return Ok(None);
+            }
+            let candidate = self.macro_patterns.iter().find(|d| {
+                if let Decl::MacroDecl { pattern, .. } = d {
+                    matches!(pattern.first(), Some(MacroPatternItem::LabelParam(_)))
+                } else {
+                    false
+                }
+            }).cloned();
+
+            if let Some(Decl::MacroDecl { name: macro_name, pattern, .. }) = candidate {
+                let label_str = lbl.trim_start_matches('@').to_string();
+                self.advance();
+
+                let mut args = vec![Expr::LiteralString(label_str)];
+
+                if let Some(MacroPatternItem::BlockParam { .. }) = pattern.get(1) {
+                    let mut block_text = String::new();
+                    if self.peek().kind == TokenKind::Hash {
+                        self.advance();
+                    }
+                    if self.peek().kind == TokenKind::LBrace {
+                        self.advance();
+                        let mut depth = 1;
+                        while !self.is_at_end() && depth > 0 {
+                            if self.peek().kind == TokenKind::LBrace {
+                                depth += 1;
+                                block_text.push('{');
+                            } else if self.peek().kind == TokenKind::RBrace {
+                                depth -= 1;
+                                if depth == 0 {
+                                    self.advance();
+                                    break;
+                                }
+                                block_text.push('}');
+                            } else {
+                                let temp_str;
+                                let tok_str = match &self.peek().kind {
+                                    TokenKind::TemplateText(t) => t.as_str(),
+                                    other => {
+                                        temp_str = other.as_str();
+                                        &temp_str
+                                    }
+                                };
+                                if !block_text.is_empty() && !block_text.ends_with('\n') && !block_text.ends_with(' ') {
+                                    block_text.push(' ');
+                                }
+                                block_text.push_str(tok_str);
+                            }
+                            self.advance();
+                        }
+                    }
+                    args.push(Expr::LiteralString(block_text.trim().to_string()));
+                }
+
+                return Ok(Some(Expr::MacroCall {
+                    callee: Box::new(Expr::Identifier(macro_name)),
+                    args,
+                }));
+            }
+        }
+        Ok(None)
     }
 }

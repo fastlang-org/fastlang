@@ -1,0 +1,488 @@
+// FastLang Standard Library: HTML Parser & Document Object Model (DOM)
+import std::types;
+import std::document;
+import std::time;
+
+using types;
+using document;
+using time;
+
+public blueprint Attribute = {
+    char key[];
+    char value[];
+}
+
+public blueprint HtmlNode = {
+    char tag[];
+    Attribute attrs[];
+    HtmlNode children[];
+    char text[];
+    char slot_name[];
+    char slot_val[];
+    bool is_slot;
+    bool is_text;
+    bool is_comment;
+    bool is_self_closing;
+}
+
+public impl HtmlNode -> {
+    fn add_child(child: HtmlNode) -> void {
+        this.children = this.children + [child];
+    }
+
+    fn add_attr(k: str, v: str) -> void {
+        Attribute attr;
+        attr.key = k;
+        attr.value = v;
+        this.attrs = this.attrs + [attr];
+    }
+
+    fn get_attr(k: str) -> str {
+        for (int32 i = 0; i < this.attrs.len; i = i + 1) {
+            if (this.attrs[i].key == k) {
+                return this.attrs[i].value;
+            }
+        }
+        return "";
+    }
+
+    fn set_slot(name: str, val: str) -> void {
+        if (this.is_slot && this.slot_name == name) {
+            this.slot_val = val;
+        }
+        for (int32 i = 0; i < this.children.len; i = i + 1) {
+            this.children[i].set_slot(name, val);
+        }
+    }
+
+    fn to_htmx() -> HtmlNode {
+        HtmlNode copy_node;
+        copy_node.tag = this.tag;
+        copy_node.text = this.text;
+        copy_node.slot_name = this.slot_name;
+        copy_node.slot_val = this.slot_val;
+        copy_node.is_slot = this.is_slot;
+        copy_node.is_text = this.is_text;
+        copy_node.is_comment = this.is_comment;
+        copy_node.is_self_closing = this.is_self_closing;
+        copy_node.attrs = [];
+
+        for (int32 i = 0; i < this.attrs.len; i = i + 1) {
+            Attribute a;
+            a.key = this.attrs[i].key;
+            a.value = this.attrs[i].value;
+            if (a.key == "onclick" || a.key == "onsubmit") {
+                a.key = "hx-post";
+            } else if (a.key == "target") {
+                if (a.value != "_blank" && a.value != "_self" && a.value != "_top" && a.value != "_parent") {
+                    a.key = "hx-target";
+                }
+            } else if (a.key == "swap") {
+                a.key = "hx-swap";
+                if (a.value == "append") {
+                    a.value = "beforeend";
+                } else if (a.value == "prepend") {
+                    a.value = "afterbegin";
+                }
+            } else if (a.key == "live") {
+                a.key = "hx-trigger";
+                if (a.value == "blur" || a.value == "change") {
+                    // keep
+                } else if (a.value == "true") {
+                    a.value = "keyup changed delay:300ms";
+                } else {
+                    a.value = "keyup changed delay:" + a.value;
+                }
+            }
+            copy_node.attrs = copy_node.attrs + [a];
+        }
+
+        copy_node.children = [];
+        for (int32 i = 0; i < this.children.len; i = i + 1) {
+            copy_node.children = copy_node.children + [this.children[i].to_htmx()];
+        }
+        return copy_node;
+    }
+
+    fn render() -> str {
+        if (this.is_comment) {
+            return "<!--" + this.text + "-->";
+        }
+        if (this.is_slot) {
+            if (this.slot_val.len > 0) {
+                return this.slot_val;
+            }
+            return "{{" + this.slot_name + "}}";
+        }
+        if (this.is_text) {
+            return this.text;
+        }
+
+        str out = "<" + this.tag;
+        for (int32 i = 0; i < this.attrs.len; i = i + 1) {
+            out = out + " " + this.attrs[i].key + "=\"" + this.attrs[i].value + "\"";
+        }
+        if (this.is_self_closing) {
+            return out + " />";
+        }
+        out = out + ">";
+        for (int32 i = 0; i < this.children.len; i = i + 1) {
+            out = out + this.children[i].render();
+        }
+        out = out + "</" + this.tag + ">";
+        return out;
+    }
+
+    handle -> {
+        fn display() -> str {
+            return this.render();
+        }
+    }
+}
+
+fn is_void_tag(t: str) -> bool {
+    return t == "area" || t == "base" || t == "br" || t == "col" || t == "embed"
+        || t == "hr" || t == "img" || t == "input" || t == "link" || t == "meta"
+        || t == "param" || t == "source" || t == "track" || t == "wbr";
+}
+
+fn skip_whitespace(input: str, pos: int32) -> int32 {
+    int32 p = pos;
+    while (p < input.len && (input[p] == ' ' || input[p] == '\t' || input[p] == '\n' || input[p] == '\r')) {
+        p = p + 1;
+    }
+    return p;
+}
+
+public fn html(input: str) -> HtmlNode {
+    HtmlNode root;
+    root.tag = "root";
+    root.attrs = [];
+    root.children = [];
+    root.is_text = false;
+    root.is_slot = false;
+    root.is_comment = false;
+    root.is_self_closing = false;
+
+    int32 len = input.len;
+    int32 i = 0;
+
+    while (i < len) {
+        if (input[i] == '<') {
+            // Check comment <!--
+            if (i + 3 < len && input[i + 1] == '!' && input[i + 2] == '-' && input[i + 3] == '-') {
+                i = i + 4;
+                str comm = "";
+                while (i + 2 < len && !(input[i] == '-' && input[i + 1] == '-' && input[i + 2] == '>')) {
+                    comm = comm + input[i];
+                    i = i + 1;
+                }
+                i = i + 3; // consume '-->'
+                HtmlNode comm_node;
+                comm_node.attrs = [];
+                comm_node.children = [];
+                comm_node.text = comm;
+                comm_node.is_comment = true;
+                comm_node.is_text = false;
+                comm_node.is_slot = false;
+                comm_node.is_self_closing = false;
+                root.add_child(comm_node);
+            } else if (i + 1 < len && input[i + 1] == '/') {
+                // Closing tag outside matching
+                while (i < len && input[i] != '>') {
+                    i = i + 1;
+                }
+                if (i < len && input[i] == '>') {
+                    i = i + 1;
+                }
+            } else {
+                // Opening tag <tag ...>
+                i = i + 1; // consume '<'
+                str tag_name = "";
+                while (i < len && input[i] != ' ' && input[i] != '>' && input[i] != '/' && input[i] != '\t' && input[i] != '\n' && input[i] != '\r') {
+                    tag_name = tag_name + input[i];
+                    i = i + 1;
+                }
+
+                HtmlNode elem;
+                elem.tag = tag_name;
+                elem.attrs = [];
+                elem.children = [];
+                elem.is_text = false;
+                elem.is_slot = false;
+                elem.is_comment = false;
+                elem.is_self_closing = false;
+
+                // Parse attributes
+                while (i < len) {
+                    i = skip_whitespace(input, i);
+                    if (i >= len || input[i] == '>' || input[i] == '/') {
+                        break;
+                    }
+                    str attr_key = "";
+                    while (i < len && input[i] != '=' && input[i] != ' ' && input[i] != '>' && input[i] != '/' && input[i] != '\t' && input[i] != '\n') {
+                        attr_key = attr_key + input[i];
+                        i = i + 1;
+                    }
+                    str attr_val = "";
+                    i = skip_whitespace(input, i);
+                    if (i < len && input[i] == '=') {
+                        i = i + 1; // consume '='
+                        i = skip_whitespace(input, i);
+                        if (i < len && (input[i] == '"' || input[i] == '\'')) {
+                            char quote = input[i];
+                            i = i + 1; // consume quote
+                            while (i < len && input[i] != quote) {
+                                attr_val = attr_val + input[i];
+                                i = i + 1;
+                            }
+                            if (i < len && input[i] == quote) {
+                                i = i + 1; // consume closing quote
+                            }
+                        } else {
+                            while (i < len && input[i] != ' ' && input[i] != '>' && input[i] != '/') {
+                                attr_val = attr_val + input[i];
+                                i = i + 1;
+                            }
+                        }
+                    }
+                    if (attr_key.len > 0) {
+                        elem.add_attr(attr_key, attr_val);
+                    }
+                }
+
+                i = skip_whitespace(input, i);
+                bool self_close = is_void_tag(tag_name);
+                if (i < len && input[i] == '/') {
+                    self_close = true;
+                    i = i + 1;
+                }
+                if (i < len && input[i] == '>') {
+                    i = i + 1;
+                }
+                elem.is_self_closing = self_close;
+
+                if (!self_close) {
+                    str inner_body = "";
+                    int32 depth = 1;
+                    while (i < len && depth > 0) {
+                        if (i + tag_name.len + 1 < len && input[i] == '<' && input[i + 1] != '/') {
+                            int32 k = 0;
+                            bool match_open = true;
+                            while (k < tag_name.len) {
+                                if (input[i + 1 + k] != tag_name[k]) {
+                                    match_open = false;
+                                    break;
+                                }
+                                k = k + 1;
+                            }
+                            if (match_open) {
+                                char next_c = input[i + 1 + tag_name.len];
+                                if (next_c == ' ' || next_c == '>' || next_c == '/') {
+                                    depth = depth + 1;
+                                }
+                            }
+                        }
+                        if (input[i] == '<' && i + 1 < len && input[i + 1] == '/') {
+                            int32 k = 0;
+                            bool match_close = true;
+                            while (k < tag_name.len && i + 2 + k < len) {
+                                if (input[i + 2 + k] != tag_name[k]) {
+                                    match_close = false;
+                                    break;
+                                }
+                                k = k + 1;
+                            }
+                            if (match_close) {
+                                int32 end_tag_idx = i + 2 + tag_name.len;
+                                while (end_tag_idx < len && input[end_tag_idx] != '>') {
+                                    end_tag_idx = end_tag_idx + 1;
+                                }
+                                if (end_tag_idx < len && input[end_tag_idx] == '>') {
+                                    depth = depth - 1;
+                                    if (depth == 0) {
+                                        i = end_tag_idx + 1;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        inner_body = inner_body + input[i];
+                        i = i + 1;
+                    }
+                    if (inner_body.len > 0) {
+                        HtmlNode inner_root = html(inner_body);
+                        elem.children = inner_root.children;
+                    }
+                }
+                root.add_child(elem);
+            }
+        } else if (input[i] == '{' && i + 1 < len && input[i + 1] == '{') {
+            i = i + 2; // consume '{{'
+            str sname = "";
+            while (i + 1 < len && !(input[i] == '}' && input[i + 1] == '}')) {
+                if (input[i] != ' ' && input[i] != '\t' && input[i] != '\n') {
+                    sname = sname + input[i];
+                }
+                i = i + 1;
+            }
+            if (i + 1 < len && input[i] == '}' && input[i + 1] == '}') {
+                i = i + 2; // consume '}}'
+            }
+            HtmlNode slot_node;
+            slot_node.attrs = [];
+            slot_node.children = [];
+            slot_node.is_slot = true;
+            slot_node.is_text = false;
+            slot_node.is_comment = false;
+            slot_node.is_self_closing = false;
+            slot_node.slot_name = sname;
+            slot_node.slot_val = "";
+            root.add_child(slot_node);
+        } else {
+            str txt = "";
+            while (i < len && input[i] != '<' && !(input[i] == '{' && i + 1 < len && input[i + 1] == '{')) {
+                txt = txt + input[i];
+                i = i + 1;
+            }
+            if (txt.len > 0) {
+                HtmlNode txt_node;
+                txt_node.attrs = [];
+                txt_node.children = [];
+                txt_node.text = txt;
+                txt_node.is_text = true;
+                txt_node.is_slot = false;
+                txt_node.is_comment = false;
+                txt_node.is_self_closing = false;
+                root.add_child(txt_node);
+            }
+        }
+    }
+
+    return root;
+}
+
+public impl HtmlDocument -> {
+    fn set_slot(name: str, val: str) -> void {
+        HtmlNode root = html(this.content);
+        root.set_slot(name, val);
+        this.content = root.render();
+    }
+    fn to_node() -> HtmlNode {
+        return html(this.content);
+    }
+}
+
+public fn to_htmx(doc: HtmlDocument) -> HtmlDocument {
+    HtmlNode root = html(doc.get_content());
+    HtmlNode h_root = root.to_htmx();
+    HtmlDocument res = new HtmlDocument();
+    res.set_content(h_root.render());
+    res.is_htmx = true;
+    return res;
+}
+
+public fn htmx(doc: HtmlDocument) -> HtmlDocument {
+    return to_htmx(doc);
+}
+
+public fn htmx(node: HtmlNode) -> HtmlNode {
+    return node.to_htmx();
+}
+
+public fn htmx(content: str) -> str {
+    return html(content).to_htmx().render();
+}
+
+public fn h1(text: str) -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<h1>" + text + "</h1>");
+    return doc;
+}
+
+public fn h2(text: str) -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<h2>" + text + "</h2>");
+    return doc;
+}
+
+public fn h3(text: str) -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<h3>" + text + "</h3>");
+    return doc;
+}
+
+public fn p(text: str := "") -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<p>" + text + "</p>");
+    return doc;
+}
+
+public fn span(text: str := "") -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<span>" + text + "</span>");
+    return doc;
+}
+
+public fn div(text: str := "") -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<div>" + text + "</div>");
+    return doc;
+}
+
+public fn div(child_doc: HtmlDocument) -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<div>" + child_doc.render() + "</div>");
+    return doc;
+}
+
+public fn button(btn_text: str := "Button", on_click: str := "", class_name: str := "") -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    str out = "<button";
+    if (class_name.len > 0) {
+        out = out + " class=\"" + class_name + "\"";
+    }
+    if (on_click.len > 0) {
+        out = out + " onclick=\"" + on_click + "\"";
+    }
+    out = out + ">" + btn_text + "</button>";
+    doc.set_content(out);
+    return doc;
+}
+
+public fn a(link_text: str, target_href: str, class_name: str := "") -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    str out = "<a";
+    if (target_href.len > 0) {
+        out = out + " href=\"" + target_href + "\"";
+    }
+    if (class_name.len > 0) {
+        out = out + " class=\"" + class_name + "\"";
+    }
+    out = out + ">" + link_text + "</a>";
+    doc.set_content(out);
+    return doc;
+}
+
+public fn input_tag(input_type: str := "text", input_name: str := "", placeholder_text: str := "") -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    str out = "<input";
+    if (input_type.len > 0) {
+        out = out + " type=\"" + input_type + "\"";
+    }
+    if (input_name.len > 0) {
+        out = out + " name=\"" + input_name + "\"";
+    }
+    if (placeholder_text.len > 0) {
+        out = out + " placeholder=\"" + placeholder_text + "\"";
+    }
+    out = out + " />";
+    doc.set_content(out);
+    return doc;
+}
+
+public fn card(title_text: str, body_doc: HtmlDocument, class_name: str := "card") -> HtmlDocument {
+    HtmlDocument doc = new HtmlDocument();
+    doc.set_content("<div class=\"" + class_name + "\"><h2>" + title_text + "</h2>" + body_doc.render() + "</div>");
+    return doc;
+}

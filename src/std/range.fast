@@ -1,4 +1,4 @@
-// FastLang Standard Library: Range Functions
+// FastLang Standard Library: Range Functions and Infix Range Macros
 public fn range(s: int) -> int[] {
     int arr[] = new int[](s);
     int i = 0;
@@ -23,6 +23,10 @@ public fn range(start: int, end: int) -> int[] {
     return arr;
 }
 
+public macro _range_ [start: int]&[..][end: int] -> {
+    return in range(start, end);
+}
+
 public fn range(start: int, end: int, step: int) -> int[] {
     if (step <= 0) {
         return new int[](0);
@@ -43,6 +47,10 @@ public fn range(start: int, end: int, step: int) -> int[] {
     return arr;
 }
 
+public macro _range_ [start: int]&[..][end: int, step: int] -> {
+    return in range(start, end, step);
+}
+
 public fn range(start: char, end: char) -> char[] {
     int s = 0;
     char c = start;
@@ -59,6 +67,10 @@ public fn range(start: char, end: char) -> char[] {
         i++;
     }
     return arr;
+}
+
+public macro _range_ [start: char]&[..][end: char] -> {
+    return in range(start, end);
 }
 
 public fn range(start: char, end: char, step: int) -> char[] {
@@ -90,6 +102,10 @@ public fn range(start: char, end: char, step: int) -> char[] {
     return arr;
 }
 
+public macro _range_ [start: char]&[..][end: char, step: int] -> {
+    return in range(start, end, step);
+}
+
 public fn range(start: float64, end: float64) -> float64[] {
     int s = 0;
     float64 cur = start;
@@ -106,6 +122,10 @@ public fn range(start: float64, end: float64) -> float64[] {
         i++;
     }
     return arr;
+}
+
+public macro _range_ [start: float64]&[..][end: float64] -> {
+    return in range(start, end);
 }
 
 public fn range(start: float64, end: float64, step: float64) -> float64[] {
@@ -127,4 +147,8 @@ public fn range(start: float64, end: float64, step: float64) -> float64[] {
         i++;
     }
     return arr;
+}
+
+public macro _range_ [start: float64]&[..][end: float64, step: float64] -> {
+    return in range(start, end, step);
 }

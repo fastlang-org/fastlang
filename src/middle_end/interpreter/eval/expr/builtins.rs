@@ -844,3 +844,80 @@ impl Interpreter {
 
 }
 
+pub fn create_comptime_time_expr() -> Expr {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now();
+    let since_epoch = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let total_secs = since_epoch.as_secs();
+    let ms = since_epoch.subsec_millis() as i32;
+    let ts_ms = since_epoch.as_millis() as i64;
+
+    let days_since_epoch = (total_secs / 86400) as i64;
+    let time_of_day = (total_secs % 86400) as i32;
+    let hour = time_of_day / 3600;
+    let minute = (time_of_day % 3600) / 60;
+    let second = time_of_day % 60;
+    let dow_int = ((days_since_epoch + 4) % 7) as i32;
+
+    let z = days_since_epoch + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1029 + doe / 1461 - doe / 36524) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as i32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as i32;
+    let year = (if m <= 2 { y + 1 } else { y }) as i32;
+
+    let day_variant = match dow_int {
+        0 => "Sunday",
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        _ => "Sunday",
+    };
+
+    let day_expr = Expr::NamespaceAccess {
+        namespace: "Day".to_string(),
+        property: Box::new(Expr::Identifier(day_variant.to_string())),
+    };
+
+    let fields = vec![
+        ("year", Expr::LiteralInt(year as i128)),
+        ("month", Expr::LiteralInt(m as i128)),
+        ("day", Expr::LiteralInt(d as i128)),
+        ("hour", Expr::LiteralInt(hour as i128)),
+        ("minute", Expr::LiteralInt(minute as i128)),
+        ("second", Expr::LiteralInt(second as i128)),
+        ("millisecond", Expr::LiteralInt(ms as i128)),
+        ("days", Expr::LiteralInt(d as i128)),
+        ("hours", Expr::LiteralInt(hour as i128)),
+        ("minutes", Expr::LiteralInt(minute as i128)),
+        ("seconds", Expr::LiteralInt(second as i128)),
+        ("milliseconds", Expr::LiteralInt(ms as i128)),
+        ("timestamp_ms", Expr::LiteralInt(ts_ms as i128)),
+    ];
+
+    let mut obj_stmts = vec![Stmt::ReassignStmt {
+        target: Expr::Identifier("day_of_week".to_string()),
+        value: day_expr,
+        op: "=".to_string(),
+    }];
+
+    for (name, val) in fields {
+        obj_stmts.push(Stmt::ReassignStmt {
+            target: Expr::Identifier(name.to_string()),
+            value: val,
+            op: "=".to_string(),
+        });
+    }
+
+    Expr::Instantiate {
+        target: Box::new(Expr::Identifier("Time".to_string())),
+        args: vec![Expr::ObjectLiteral(obj_stmts)],
+    }
+}

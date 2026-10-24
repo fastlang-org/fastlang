@@ -1,3 +1,6 @@
+use crate::backend::cranelift::context::{is_current_block_terminated, FunctionContext};
+use crate::backend::cranelift::stmt::lower_stmt;
+use crate::backend::cranelift::types::map_base_type;
 use crate::frontend::parser::ast::*;
 use cranelift::prelude::*;
 use cranelift_module::{Linkage, Module};
@@ -26,7 +29,9 @@ impl CraneliftAotBackend {
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
             panic!("host machine is not supported: {}", msg);
         });
-        let isa = isa_builder.finish(settings::Flags::new(flag_builder)).unwrap();
+        let isa = isa_builder
+            .finish(settings::Flags::new(flag_builder))
+            .unwrap();
 
         let builder = cranelift_object::ObjectBuilder::new(
             isa,
@@ -51,21 +56,31 @@ impl CraneliftAotBackend {
 
         // 1. Declare functions
         for stmt in ast {
-            if let Stmt::Declaration(Decl::FnDecl { name, params, return_type, .. }) = stmt {
-                if self.funcs.contains_key(name) {
+            if let Stmt::Declaration(Decl::FnDecl {
+                name,
+                params,
+                return_type,
+                generics,
+                is_abstract,
+                ..
+            }) = stmt
+            {
+                if !generics.is_empty() || *is_abstract || self.funcs.contains_key(name) {
                     continue;
                 }
                 let mut sig = self.module.make_signature();
                 sig.call_conv = default_conv;
                 for param in params {
-                    sig.params.push(cranelift::prelude::AbiParam::new(
-                        super::CraneliftBackend::map_base_type(&param.type_node),
-                    ));
+                    sig.params
+                        .push(cranelift::prelude::AbiParam::new(map_base_type(
+                            &param.type_node,
+                        )));
                 }
                 if *return_type != BaseType::Void {
-                    sig.returns.push(cranelift::prelude::AbiParam::new(
-                        super::CraneliftBackend::map_base_type(return_type),
-                    ));
+                    sig.returns
+                        .push(cranelift::prelude::AbiParam::new(map_base_type(
+                            return_type,
+                        )));
                 }
                 let func_id = self
                     .module
@@ -78,25 +93,41 @@ impl CraneliftAotBackend {
         // 2. Define functions
         let funcs_clone = self.funcs.clone();
         for stmt in ast {
-            if let Stmt::Declaration(Decl::FnDecl { name, params, return_type, .. }) = stmt {
+            if let Stmt::Declaration(Decl::FnDecl {
+                name,
+                params,
+                return_type,
+                generics,
+                is_abstract,
+                body,
+                ..
+            }) = stmt
+            {
+                if !generics.is_empty() || *is_abstract {
+                    continue;
+                }
                 if let Some(&func_id) = funcs_clone.get(name) {
                     self.ctx.clear();
                     self.builder_context = FunctionBuilderContext::new();
                     self.ctx.func.signature.call_conv = default_conv;
 
                     for param in params {
-                        self.ctx.func.signature.params.push(
-                            cranelift::prelude::AbiParam::new(
-                                super::CraneliftBackend::map_base_type(&param.type_node),
-                            ),
-                        );
+                        self.ctx
+                            .func
+                            .signature
+                            .params
+                            .push(cranelift::prelude::AbiParam::new(map_base_type(
+                                &param.type_node,
+                            )));
                     }
                     if *return_type != BaseType::Void {
-                        self.ctx.func.signature.returns.push(
-                            cranelift::prelude::AbiParam::new(
-                                super::CraneliftBackend::map_base_type(return_type),
-                            ),
-                        );
+                        self.ctx
+                            .func
+                            .signature
+                            .returns
+                            .push(cranelift::prelude::AbiParam::new(map_base_type(
+                                return_type,
+                            )));
                     }
 
                     let mut builder = cranelift_frontend::FunctionBuilder::new(
@@ -107,21 +138,41 @@ impl CraneliftAotBackend {
                     let entry_block = builder.create_block();
                     builder.append_block_params_for_function_params(entry_block);
                     builder.switch_to_block(entry_block);
-                    builder.seal_block(entry_block);
 
-                    if *return_type == BaseType::Void {
-                        builder.ins().return_(&[]);
+                    let ret_ty = if *return_type != BaseType::Void {
+                        Some(map_base_type(return_type))
                     } else {
-                        let zero = builder.ins().iconst(
-                            super::CraneliftBackend::map_base_type(return_type),
-                            0,
-                        );
-                        builder.ins().return_(&[zero]);
+                        None
+                    };
+                    let mut fn_ctx = FunctionContext::new(funcs_clone.clone(), ret_ty);
+                    let block_params = builder.block_params(entry_block).to_vec();
+                    for (i, param) in params.iter().enumerate() {
+                        let param_ty = map_base_type(&param.type_node);
+                        let var = fn_ctx.declare_variable(&mut builder, &param.name, param_ty);
+                        builder.def_var(var, block_params[i]);
                     }
+
+                    for s in body {
+                        lower_stmt(&mut self.module, &mut builder, &mut fn_ctx, s);
+                    }
+
+                    if !is_current_block_terminated(&builder) {
+                        if *return_type == BaseType::Void {
+                            builder.ins().return_(&[]);
+                        } else {
+                            let zero = builder.ins().iconst(map_base_type(return_type), 0);
+                            builder.ins().return_(&[zero]);
+                        }
+                    }
+
+                    builder.seal_block(entry_block);
                     let target_config = self.module.target_config();
                     builder.finalize(target_config);
 
-                    let _ = self.module.define_function(func_id, &mut self.ctx);
+                    println!("CRANELIFT: Defining function '{}'", name);
+                    self.module
+                        .define_function(func_id, &mut self.ctx)
+                        .unwrap_or_else(|_| panic!("Failed to define function {}", name));
                 }
             }
         }

@@ -182,6 +182,8 @@ impl SemanticAnalyzer {
                         .trim_end_matches('>')
                         .trim_end_matches("[]")
                         .to_string()
+                } else if iterable_type == "unknown" {
+                    "auto".to_string()
                 } else if let Some(bp) = bp_opt {
                     let specialized_bp = bp.specialize(&type_args);
                     let has_iter = specialized_bp.handle_signatures.contains_key("iter")

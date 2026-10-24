@@ -23,6 +23,7 @@ pub struct Parser {
     pub(crate) current_generics: std::collections::HashSet<String>,
     pub(crate) type_aliases: HashMap<String, BaseType>,
     pub(crate) in_match_pattern: bool,
+    pub(crate) macro_patterns: Vec<Decl>,
 }
 
 impl Parser {
@@ -31,8 +32,24 @@ impl Parser {
         for i in 0..tokens.len() {
             if tokens[i].kind == TokenKind::TypeMacro {
                 if let Some(next) = tokens.get(i + 1) {
-                    if let TokenKind::Identifier(ref name) = next.kind {
-                        macro_metadata.insert(name.clone());
+                    match &next.kind {
+                        TokenKind::Identifier(name) | TokenKind::LabelName(name) => {
+                            macro_metadata.insert(name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            } else if let TokenKind::LabelName(ref lbl) = tokens[i].kind {
+                if lbl == "@compile" && tokens.get(i + 1).map(|t| &t.kind) == Some(&TokenKind::DoubleColon) {
+                    if tokens.get(i + 2).map(|t| &t.kind) == Some(&TokenKind::TypeMacro) {
+                        if let Some(next) = tokens.get(i + 3) {
+                            match &next.kind {
+                                TokenKind::Identifier(name) | TokenKind::LabelName(name) => {
+                                    macro_metadata.insert(name.clone());
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
             }
@@ -48,11 +65,17 @@ impl Parser {
             current_generics: std::collections::HashSet::new(),
             type_aliases,
             in_match_pattern: false,
+            macro_patterns: Vec::new(),
         }
     }
 
     pub fn new(tokens: Vec<Token>) -> Self {
         Self::new_with_aliases(tokens, HashMap::new())
+    }
+
+    pub fn with_macro_patterns(mut self, patterns: Vec<Decl>) -> Self {
+        self.macro_patterns = patterns;
+        self
     }
 
     pub(crate) fn peek(&self) -> &Token {
@@ -127,6 +150,14 @@ impl Parser {
         error_message: &str,
     ) -> Result<&Token, String> {
         if discriminant(&self.peek().kind) == discriminant(&expected) {
+            Ok(self.advance())
+        } else if expected == TokenKind::Greater && self.peek().kind == TokenKind::ShiftRight {
+            // Split `>>` into `>` followed by `>`
+            let tok = self.peek();
+            let line = tok.line;
+            let col = tok.column;
+            self.tokens[self.current].kind = TokenKind::Greater;
+            self.tokens.insert(self.current + 1, Token::new(TokenKind::Greater, line, col + 1));
             Ok(self.advance())
         } else {
             // Future location for line-based diagnostics and hints

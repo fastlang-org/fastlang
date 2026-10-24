@@ -312,21 +312,15 @@ impl SemanticAnalyzer {
                 } else {
                     Vec::new()
                 };
-                // Generic Macro lookup and type checking
-                let macro_info = match &**callee {
+                // Generic Macro lookup and overload-aware type checking
+                let macro_name_candidates = match &**callee {
                     Expr::Identifier(fn_name) => {
-                        self.current_env.borrow().lookup(fn_name).and_then(|info| {
-                            if let SymbolKind::Macro {
-                                params,
-                                return_type,
-                                ..
-                            } = &info.kind
-                            {
-                                Some((fn_name.clone(), params.clone(), return_type.clone()))
-                            } else {
-                                None
-                            }
-                        })
+                        let without_dollar = fn_name.trim_start_matches('$');
+                        vec![
+                            fn_name.clone(),
+                            format!("${}", fn_name),
+                            without_dollar.to_string(),
+                        ]
                     }
                     Expr::NamespaceAccess {
                         namespace,
@@ -337,251 +331,107 @@ impl SemanticAnalyzer {
                         } else {
                             ""
                         };
-                        let candidates = vec![
+                        let clean_prop = prop_str.trim_start_matches('$');
+                        vec![
                             format!("{}::{}", namespace, prop_str),
                             format!("{}::${}", namespace, prop_str),
+                            format!("{}::{}", namespace, clean_prop),
                             prop_str.to_string(),
                             format!("${}", prop_str),
-                        ];
-                        let mut found = None;
-                        let segments: Vec<&str> = namespace.split("::").collect();
-                        if let Some(info) = self
-                            .current_env
-                            .borrow()
-                            .lookup_qualified(&segments, prop_str)
-                        {
-                            if let SymbolKind::Macro {
-                                params,
-                                return_type,
-                                ..
-                            } = &info.kind
-                            {
-                                found = Some((
-                                    format!("{}::{}", namespace, prop_str),
-                                    params.clone(),
-                                    return_type.clone(),
-                                ));
-                            }
-                        }
-                        if found.is_none() {
-                            for cand in candidates {
-                                if let Some(info) = self.current_env.borrow().lookup(&cand) {
-                                    if let SymbolKind::Macro {
-                                        params,
-                                        return_type,
-                                        ..
-                                    } = &info.kind
-                                    {
-                                        found = Some((cand, params.clone(), return_type.clone()));
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        found
+                            clean_prop.to_string(),
+                        ]
                     }
-                    _ => None,
+                    _ => Vec::new(),
                 };
 
-                if let Some((macro_name, params, return_type)) = macro_info {
-                    if args.len() != params.len() {
-                        return Err(format!(
-                            "Semantic Error: Macro '{}' expects {} arguments, but got {}.",
-                            macro_name,
-                            params.len(),
-                            args.len()
-                        ));
-                    }
-                    for (arg, param) in args.iter().zip(params.iter()) {
-                        let arg_type = self.visit_expression(arg)?;
-                        let param_type_str = param.type_node.as_str();
-                        if arg_type != "unknown"
-                            && param_type_str != "unknown"
-                            && !self.types_are_compatible(&param_type_str, &arg_type)
-                        {
-                            return Err(format!(
-                                "Semantic Error: Macro '{}' parameter '{}' type mismatch. Expected '{}', got '{}'",
-                                macro_name,
-                                param.name,
-                                param_type_str,
-                                arg_type
-                            ));
+                let mut resolved_overloads = Vec::new();
+                let mut resolved_macro_name = String::new();
+
+                for cand in &macro_name_candidates {
+                    if let Some(overloads) = self.macro_overloads.get(cand) {
+                        if !overloads.is_empty() {
+                            resolved_overloads = overloads.clone();
+                            resolved_macro_name = cand.clone();
+                            break;
                         }
                     }
-
-                    return Ok(return_type.as_str());
+                    if let Some(info) = self.current_env.borrow().lookup(cand) {
+                        if let SymbolKind::Macro {
+                            params,
+                            return_type,
+                            body,
+                        } = info.kind
+                        {
+                            resolved_overloads.push((params, return_type, body));
+                            resolved_macro_name = cand.clone();
+                            break;
+                        }
+                    }
                 }
 
-                // Generic Micro lookup and type checking
-                let micro_info = match &**callee {
-                    Expr::Identifier(fn_name) => {
-                        self.current_env.borrow().lookup(fn_name).and_then(|info| {
-                            if let SymbolKind::Micro {
-                                params,
-                                generics,
-                                body,
-                            } = &info.kind
-                            {
-                                Some((
-                                    fn_name.clone(),
-                                    params.clone(),
-                                    generics.clone(),
-                                    body.clone(),
-                                ))
-                            } else {
-                                None
-                            }
-                        })
+                if !resolved_overloads.is_empty() {
+                    let mut arg_types = Vec::with_capacity(args.len());
+                    for a in args.iter() {
+                        arg_types.push(self.visit_expression(a)?);
                     }
-                    Expr::NamespaceAccess {
-                        namespace,
-                        property,
-                    } => {
-                        let prop_str = if let Expr::Identifier(p) = &**property {
-                            p.clone()
-                        } else {
-                            "".to_string()
-                        };
-                        let candidates =
-                            vec![format!("{}::{}", namespace, prop_str), prop_str.clone()];
-                        let mut found = None;
-                        let segments: Vec<&str> = namespace.split("::").collect();
-                        if let Some(info) = self
-                            .current_env
-                            .borrow()
-                            .lookup_qualified(&segments, &prop_str)
-                        {
-                            if let SymbolKind::Micro {
-                                params,
-                                generics,
-                                body,
-                            } = &info.kind
-                            {
-                                found = Some((
-                                    format!("{}::{}", namespace, prop_str),
-                                    params.clone(),
-                                    generics.clone(),
-                                    body.clone(),
-                                ));
-                            }
-                        }
-                        if found.is_none() {
-                            for cand in candidates {
-                                if let Some(info) = self.current_env.borrow().lookup(&cand) {
-                                    if let SymbolKind::Micro {
-                                        params,
-                                        generics,
-                                        body,
-                                    } = &info.kind
-                                    {
-                                        found = Some((
-                                            cand,
-                                            params.clone(),
-                                            generics.clone(),
-                                            body.clone(),
-                                        ));
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        found
-                    }
-                    _ => None,
-                };
 
-                if let Some((micro_name, params, _generics, micro_body)) = micro_info {
-                    if args.len() != params.len() {
+                    let mut matched_ret = None;
+                    let mut count_mismatch_counts = Vec::new();
+                    let mut type_mismatches = Vec::new();
+
+                    for (params, return_type, _) in &resolved_overloads {
+                        if params.len() != args.len() {
+                            count_mismatch_counts.push(params.len());
+                            continue;
+                        }
+
+                        let mut types_match = true;
+                        for (arg_type, param) in arg_types.iter().zip(params.iter()) {
+                            let param_type_str = param.type_node.as_str();
+                            if arg_type != "unknown"
+                                && param_type_str != "unknown"
+                                && !self.types_are_compatible(&param_type_str, arg_type)
+                            {
+                                type_mismatches.push((
+                                    param.name.clone(),
+                                    param_type_str,
+                                    arg_type.clone(),
+                                ));
+                                types_match = false;
+                                break;
+                            }
+                        }
+
+                        if types_match {
+                            matched_ret = Some(return_type.as_str());
+                            break;
+                        }
+                    }
+
+                    if matched_ret.is_some() {
+                        // Macros do not have a rigid return type before expansion.
+                        // The actual type check happens on the injected/folded AST.
+                        return Ok("unknown".to_string());
+                    }
+
+                    if let Some((p_name, expected, got)) = type_mismatches.first() {
                         return Err(format!(
-                            "Semantic Error: Micro '{}' expects {} arguments, but got {}.",
-                            micro_name,
-                            params.len(),
-                            args.len()
+                            "Semantic Error: Macro '{}' parameter '{}' type mismatch. Expected '{}', got '{}'",
+                            resolved_macro_name, p_name, expected, got
                         ));
                     }
-                    for (arg, param) in args.iter().zip(params.iter()) {
-                        let arg_type = self.visit_expression(arg)?;
-                        let param_type_str = param.type_node.as_str();
-                        if arg_type != "unknown"
-                            && param_type_str != "unknown"
-                            && !self.types_are_compatible(&param_type_str, &arg_type)
-                        {
-                            return Err(format!(
-                                "Semantic Error: Micro '{}' parameter '{}' type mismatch. Expected '{}', got '{}'",
-                                micro_name,
-                                param.name,
-                                param_type_str,
-                                arg_type
-                            ));
-                        }
+
+                    if let Some(expected_len) = count_mismatch_counts.first() {
+                        return Err(format!(
+                            "Semantic Error: Macro '{}' expects {} arguments, but got {}.",
+                            resolved_macro_name, expected_len, args.len()
+                        ));
                     }
 
-                    // Infer return type from micro body when called in expression
-                    let mut ret_ty = "void".to_string();
-                    for s in &micro_body {
-                        if let Stmt::ReturnStmt(Some(ret_expr)) = s {
-                            self.enter_scope();
-                            for (arg, param) in args.iter().zip(params.iter()) {
-                                let arg_ty = self
-                                    .visit_expression(arg)
-                                    .unwrap_or_else(|_| "unknown".to_string());
-                                let _ = self.current_env.borrow_mut().define(
-                                    param.name.clone(),
-                                    SymbolInfo {
-                                        name: param.name.clone(),
-                                        kind: SymbolKind::Variable {
-                                            type_node: BaseType::from_str(&arg_ty),
-                                            editability: Editability::Editable,
-                                            is_array: false,
-                                        },
-                                        visibility: Visibility::Public,
-                                        dependencies: vec![],
-                                        is_used: false,
-                                        is_param: true,
-                                        is_uninitialized: false,
-                                        is_compilable: true,
-                                    },
-                                );
-                            }
-                            if let Ok(t) = self.visit_expression(ret_expr) {
-                                ret_ty = t;
-                            }
-                            self.leave_scope();
-                            break;
-                        } else if let Stmt::ExpressionStmt(expr_stmt) = s {
-                            if micro_body.len() == 1 {
-                                self.enter_scope();
-                                for (arg, param) in args.iter().zip(params.iter()) {
-                                    let arg_ty = self
-                                        .visit_expression(arg)
-                                        .unwrap_or_else(|_| "unknown".to_string());
-                                    let _ = self.current_env.borrow_mut().define(
-                                        param.name.clone(),
-                                        SymbolInfo {
-                                            name: param.name.clone(),
-                                            kind: SymbolKind::Variable {
-                                                type_node: BaseType::from_str(&arg_ty),
-                                                editability: Editability::Editable,
-                                                is_array: false,
-                                            },
-                                            visibility: Visibility::Public,
-                                            dependencies: vec![],
-                                            is_used: false,
-                                            is_param: true,
-                                            is_uninitialized: false,
-                                            is_compilable: true,
-                                        },
-                                    );
-                                }
-                                if let Ok(t) = self.visit_expression(expr_stmt) {
-                                    ret_ty = t;
-                                }
-                                self.leave_scope();
-                            }
-                        }
-                    }
-
-                    return Ok(ret_ty);
+                    return Err(format!(
+                        "Semantic Error: Macro '{}' has no matching overload for argument types ({}).",
+                        resolved_macro_name, arg_types.join(", ")
+                    ));
                 }
 
                 if let Expr::PropertyAccess { object, property } = &**callee {
@@ -837,6 +687,24 @@ impl SemanticAnalyzer {
                     if property == "as_str" && args.is_empty() {
                         return Ok("array<char>".to_string());
                     }
+                    if property == "select" {
+                        for arg in args {
+                            self.visit_expression(arg)?;
+                        }
+                        return Ok("array<str>".to_string());
+                    }
+                    if property == "insert" {
+                        for arg in args {
+                            self.visit_expression(arg)?;
+                        }
+                        return Ok("str".to_string());
+                    }
+                    if property == "get_content" {
+                        return Ok("str".to_string());
+                    }
+                    if property == "type" && args.is_empty() {
+                        return Ok("str".to_string());
+                    }
 
                     // Forward method call via `property_access` handle if defined on wrapper
                     if let Some(target_type) = self.resolve_property_access_target_type(&obj_type) {
@@ -905,43 +773,47 @@ impl SemanticAnalyzer {
                         if let Expr::Identifier(prop_name) = &**property {
                             let qualified = format!("{}::{}", namespace, prop_name);
                             let segments: Vec<&str> = namespace.split("::").collect();
-                            if let Some(info) = self
-                                .current_env
-                                .borrow()
-                                .lookup_qualified(&segments, prop_name)
-                            {
-                                if let Some(ret) = info.type_node() {
-                                    ret_type_from_ns = Some(ret.as_str());
-                                }
-                                Some(qualified)
-                            } else if self.current_env.borrow().lookup(&qualified).is_some() {
-                                Some(qualified)
-                            } else if let Some(bp) =
-                                self.current_env.borrow().lookup_blueprint(namespace)
-                            {
-                                if let Some(sig) = bp
-                                    .methods
-                                    .get(prop_name)
-                                    .or_else(|| bp.handle_signatures.get(prop_name))
-                                {
-                                    ret_type_from_ns = Some(sig.return_type.as_str());
-                                    Some(prop_name.clone())
+                            let dollar_prop = format!("${}", prop_name);
+                            let dollar_qualified = format!("{}::${}", namespace, prop_name);
+                            let (found_ret, should_rec) = {
+                                let env = self.current_env.borrow();
+                                if let Some(info) = env.lookup_qualified(&segments, prop_name).or_else(|| env.lookup_qualified(&segments, &dollar_prop)) {
+                                    (info.type_node().map(|ret| ret.as_str()), false)
+                                } else if env.lookup(&qualified).is_some() || env.lookup(&dollar_qualified).is_some() {
+                                    (None, false)
+                                } else if let Some(bp) = env.lookup_blueprint(namespace) {
+                                    if let Some(sig) = bp.methods.get(prop_name).or_else(|| bp.methods.get(&dollar_prop)).or_else(|| bp.handle_signatures.get(prop_name)) {
+                                        (Some(sig.return_type.as_str()), true)
+                                    } else {
+                                        (None, false)
+                                    }
                                 } else {
-                                    Some(qualified)
+                                    (None, false)
                                 }
-                            } else if let Some(meta) = self.global_metadata.get(namespace) {
-                                if let Some(sig) = meta
-                                    .methods
-                                    .get(prop_name)
-                                    .or_else(|| meta.handle_signatures.get(prop_name))
-                                {
-                                    ret_type_from_ns = Some(sig.return_type.as_str());
-                                    Some(prop_name.clone())
-                                } else {
-                                    Some(qualified)
+                            };
+                            if let Some(ret) = found_ret {
+                                if should_rec {
+                                    self.record_dependency(namespace.to_string());
+                                    self.record_dependency(qualified.clone());
                                 }
+                                ret_type_from_ns = Some(ret);
+                                Some(qualified)
                             } else {
-                                Some(qualified)
+                                let sig_ret = self.global_metadata.get(namespace).and_then(|meta| {
+                                    meta.methods
+                                        .get(prop_name)
+                                        .or_else(|| meta.methods.get(&dollar_prop))
+                                        .or_else(|| meta.handle_signatures.get(prop_name))
+                                        .map(|sig| sig.return_type.as_str())
+                                });
+                                if let Some(ret_str) = sig_ret {
+                                    self.record_dependency(namespace.to_string());
+                                    self.record_dependency(qualified.clone());
+                                    ret_type_from_ns = Some(ret_str);
+                                    Some(prop_name.clone())
+                                } else {
+                                    Some(qualified)
+                                }
                             }
                         } else {
                             None
@@ -1048,7 +920,10 @@ impl SemanticAnalyzer {
                                         });
                                     return Ok(target_t);
                                 }
-                                "print" | "throw" => return Ok("void".to_string()),
+                                "print" | "throw" | "write" => return Ok("void".to_string()),
+                                "open" | "toml" | "get_toml" => return Ok("str".to_string()),
+                                "create_ident" => return Ok("ident".to_string()),
+                                "time" => return Ok("Time".to_string()),
                                 "cast" => {
                                     let target_t = call_generics
                                         .first()
@@ -1166,7 +1041,9 @@ impl SemanticAnalyzer {
                             return Ok(call_sig.return_type.as_str());
                         }
                     }
-                    if let Some(sigs) = self.fn_overloads.get(name).cloned() {
+                    let lookup_name = self.fn_aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+                    let sigs_opt = self.fn_overloads.get(name).cloned().or_else(|| self.fn_overloads.get(lookup_name).cloned());
+                    if let Some(sigs) = sigs_opt {
                         let mut best_match = None;
                         // Pass 1: Prioritize exact concrete overloads
                         for sig in &sigs {
@@ -1334,6 +1211,20 @@ impl SemanticAnalyzer {
                     } else {
                         return Ok("void".to_string());
                     }
+                } else if let Expr::IndexAccess { object, indices } = &**callee {
+                    if let Expr::Identifier(ref name) = &**object {
+                        if let Some(meta) = self.global_metadata.get(name) {
+                            if matches!(meta.ty, BaseType::Enum { .. }) {
+                                for arg in args {
+                                    self.visit_expression(arg)?;
+                                }
+                                for idx in indices {
+                                    self.visit_expression(idx)?;
+                                }
+                                return Ok(name.clone());
+                            }
+                        }
+                    }
                 }
                 Ok("unknown".to_string())
             }
@@ -1452,6 +1343,9 @@ impl SemanticAnalyzer {
                     "*" => Some("mul"),
                     "/" => Some("div"),
                     "%" => Some("mod"),
+                    "<<" => Some("shift_left"),
+                    ">>" => Some("shift_right"),
+                    "^" => Some("caret"),
                     "==" => Some("equal"),
                     "!=" => Some("not_equal"),
                     "<" => Some("less_than"),
@@ -1462,6 +1356,25 @@ impl SemanticAnalyzer {
                 };
                 if let Some(h) = op_handle {
                     self.record_dependency(format!("{}::{}", left_type, h));
+                    let clean_left = left_type.trim_end_matches('*').trim();
+                    if let Some(bp) = self.current_env.borrow().lookup_blueprint(clean_left) {
+                        if let Some(sig) = bp.handle_signatures.get(h).or_else(|| bp.methods.get(h)) {
+                            let param_match = sig.params.is_empty()
+                                || (sig.params.len() == 1 && self.types_are_compatible(&sig.params[0].type_node.as_str(), &right_type));
+                            if param_match {
+                                return Ok(sig.return_type.as_str());
+                            }
+                        }
+                    }
+                    if let Some(meta) = self.global_metadata.get(clean_left) {
+                        if let Some(sig) = meta.handle_signatures.get(h).or_else(|| meta.methods.get(h)) {
+                            let param_match = sig.params.is_empty()
+                                || (sig.params.len() == 1 && self.types_are_compatible(&sig.params[0].type_node.as_str(), &right_type));
+                            if param_match {
+                                return Ok(sig.return_type.as_str());
+                            }
+                        }
+                    }
                 }
                 match operator.as_str() {
                     "==" | "!=" | ">" | "<" | ">=" | "<=" | "&&" | "||" => Ok("bool".to_string()),
@@ -1511,6 +1424,64 @@ impl SemanticAnalyzer {
                 }
 
                 let obj_type = self.visit_expression(object)?;
+
+                if let Expr::Identifier(ref name) = &**object {
+                    if let Some(meta) = self.global_metadata.get(name) {
+                        if matches!(meta.ty, BaseType::Enum { .. }) {
+                            if indices.len() != 1 {
+                                return Err(format!(
+                                    "Semantic Error: Enum '{}' indexing requires exactly 1 index, found {}.",
+                                    name, indices.len()
+                                ));
+                            }
+                            if let Expr::LiteralInt(val) = &indices[0] {
+                                if let Some(ref vars) = meta.variants {
+                                    let mut implicit_counter: i128 = 0;
+                                    let mut matched = false;
+                                    let has_default = vars.iter().any(|v| v.is_default);
+                                    for v in vars {
+                                        let expected_val = if let Some(Expr::LiteralInt(dv)) = &v.discriminant {
+                                            implicit_counter = *dv + 1;
+                                            *dv
+                                        } else {
+                                            let v_val = implicit_counter;
+                                            implicit_counter += 1;
+                                            v_val
+                                        };
+                                        if expected_val == *val {
+                                            matched = true;
+                                            break;
+                                        }
+                                    }
+                                    if !matched && !has_default {
+                                        return Err(format!(
+                                            "Semantic Error: No variant in enum '{}' matches discriminant/index {}.",
+                                            name, val
+                                        ));
+                                    }
+                                }
+                            } else if let Expr::LiteralString(s) = &indices[0] {
+                                if let Some(ref vars) = meta.variants {
+                                    let has_default = vars.iter().any(|v| v.is_default);
+                                    let matched = vars.iter().any(|v| {
+                                        if let Some(Expr::LiteralString(ds)) = &v.discriminant {
+                                            ds == s
+                                        } else {
+                                            false
+                                        }
+                                    });
+                                    if !matched && !has_default {
+                                        return Err(format!(
+                                            "Semantic Error: No variant in enum '{}' matches string discriminant \"{}\".",
+                                            name, s
+                                        ));
+                                    }
+                                }
+                            }
+                            return Ok(name.clone());
+                        }
+                    }
+                }
 
                 let mut current_type = obj_type.clone();
                 let clean_name = BaseType::from_str(&current_type)
@@ -1603,8 +1574,9 @@ impl SemanticAnalyzer {
                                 || bp.methods.contains_key("index_access")
                             {
                                 let ret = bp
-                                    .methods
+                                    .handle_signatures
                                     .get("index_access")
+                                    .or_else(|| bp.methods.get("index_access"))
                                     .map(|s| s.return_type.as_str())
                                     .unwrap_or_else(|| "int32".to_string());
                                 Some(ret)
@@ -1625,8 +1597,9 @@ impl SemanticAnalyzer {
                             || meta.methods.contains_key("index_access")
                         {
                             let ret = meta
-                                .methods
+                                .handle_signatures
                                 .get("index_access")
+                                .or_else(|| meta.methods.get("index_access"))
                                 .map(|s| s.return_type.as_str())
                                 .unwrap_or_else(|| "int32".to_string());
                             Some(ret)
@@ -1863,6 +1836,15 @@ impl SemanticAnalyzer {
 
                 if source_ft.castable_to(&target_ft) {
                     return Ok(target_type_str);
+                }
+
+                // Check enum-to-primitive cast (e.g. `X::A as int32`)
+                if let Some(meta) = self.global_metadata.get(&source_base) {
+                    if meta.variants.is_some() || matches!(meta.ty, BaseType::Enum { .. }) {
+                        if target_ft.is_primitive() && !target_ft.is_array() {
+                            return Ok(target_type_str);
+                        }
+                    }
                 }
 
                 // Check handle cast on source type (struct, class, blueprint, etc.)

@@ -1,6 +1,7 @@
 use crate::backend::cpp::generator::CodeGenerator;
 use crate::backend::cpp::stmt::types::*;
 use crate::frontend::parser::ast::*;
+use crate::middle_end::semantic::analyzer::detect_execution_mode;
 
 impl CodeGenerator {
     pub(crate) fn visit_declaration(&mut self, decl: &Decl) {
@@ -19,7 +20,6 @@ impl CodeGenerator {
                 place: _,
                 ..
             } => {
-
                 let cpp_type = if matches!(type_node, BaseType::Unknown) || assign_op == ":=" {
                     "auto".to_string()
                 } else {
@@ -37,6 +37,7 @@ impl CodeGenerator {
                 let is_param = matches!(value, Expr::Identifier(s) if s == "__param__");
                 let is_const = editability == &Editability::NotEditable;
                 let const_prefix = if is_const { "const " } else { "" };
+                let static_prefix = if self.in_static_block { "static inline " } else { "" };
                 self.vars.insert(name.clone(), cpp_type.clone());
                 if let Some(ref cls) = self.current_class_name {
                     self.struct_field_types
@@ -94,9 +95,10 @@ impl CodeGenerator {
                 };
 
                 if (matches!(type_node, BaseType::Address(_)) || cpp_type.ends_with('&'))
-                    && val_code.starts_with('&') {
-                        val_code = val_code[1..].to_string();
-                    }
+                    && val_code.starts_with('&')
+                {
+                    val_code = val_code[1..].to_string();
+                }
 
                 if cpp_type.contains('<') {
                     let raw_name = cpp_type.split('<').next().unwrap_or(&cpp_type);
@@ -127,8 +129,8 @@ impl CodeGenerator {
                         self.emit(&format!("{}.arrow_assign({});", name, val_code));
                     } else {
                         self.emit(&format!(
-                            "{}{} {} = {};",
-                            const_prefix, cpp_type, name, val_code
+                            "{}{}{} {} = {};",
+                            static_prefix, const_prefix, cpp_type, name, val_code
                         ));
                     }
                 } else if assign_op == "=" || assign_op == ":=" || assign_op.is_empty() {
@@ -136,18 +138,18 @@ impl CodeGenerator {
                         .find_assign_handle(&cpp_type, &["equal_assign"])
                         .is_some()
                     {
-                        self.emit(&format!("{}{} {};", const_prefix, cpp_type, name));
+                        self.emit(&format!("{}{}{} {};", static_prefix, const_prefix, cpp_type, name));
                         self.emit(&format!("{}.equal_assign({});", name, val_code));
                     } else {
                         self.emit(&format!(
-                            "{}{} {} = {};",
-                            const_prefix, cpp_type, name, val_code
+                            "{}{}{} {} = {};",
+                            static_prefix, const_prefix, cpp_type, name, val_code
                         ));
                     }
                 } else {
                     self.emit(&format!(
-                        "{}{} {} {} {};",
-                        const_prefix, cpp_type, name, assign_op, val_code
+                        "{}{}{} {} {} {};",
+                        static_prefix, const_prefix, cpp_type, name, assign_op, val_code
                     ));
                 }
             }
@@ -311,6 +313,13 @@ impl CodeGenerator {
                 }
             }
 
+            Decl::FnAliasDecl { name, target, .. } => {
+                self.emit(&format!(
+                    "template<typename... Args> inline auto {}(Args&&... args) -> decltype({}(std::forward<Args>(args)...)) {{ return {}(std::forward<Args>(args)...); }}",
+                    name, target, target
+                ));
+            }
+
             Decl::FnDecl {
                 name,
                 generics,
@@ -322,8 +331,7 @@ impl CodeGenerator {
                 visibility: _,
             } => {
                 if name.starts_with("@compile::")
-                    || crate::middle_end::semantic::analyzer::detect_execution_mode(body)
-                        == ExecutionMode::FullyCompilable
+                    || detect_execution_mode(body) == ExecutionMode::FullyCompilable
                 {
                     return;
                 }
@@ -416,8 +424,9 @@ impl CodeGenerator {
                 }
 
                 let virtual_prefix = if *is_virtual { "virtual " } else { "" };
+                let static_prefix = if self.in_static_block { "static " } else { "" };
                 let inline_prefix =
-                    if !self.in_class_or_scope && safe_name != "main" && !*is_virtual {
+                    if !self.in_static_block && !self.in_class_or_scope && safe_name != "main" && !*is_virtual {
                         "inline "
                     } else {
                         ""
@@ -429,7 +438,8 @@ impl CodeGenerator {
                     self.emit("int main(int fl_argc, char* fl_argv[]) {");
                 } else {
                     self.emit(&format!(
-                        "{}{}{} {}({}) {{",
+                        "{}{}{}{} {}({}) {{",
+                        static_prefix,
                         inline_prefix,
                         virtual_prefix,
                         ret_type_str,
@@ -437,6 +447,9 @@ impl CodeGenerator {
                         param_strs.join(", ")
                     ));
                 }
+
+                let was_static = self.in_static_block;
+                self.in_static_block = false;
 
                 self.indent_level += 1;
                 if !self.in_class_or_scope {
@@ -568,6 +581,7 @@ impl CodeGenerator {
                 self.indent_level -= 1;
 
                 self.emit("}");
+                self.in_static_block = was_static;
                 self.current_fn_name = prev_fn_name;
                 for v in added_variadics {
                     self.variadic_packs.remove(&v);
@@ -674,9 +688,6 @@ impl CodeGenerator {
                 self.indent_level -= 1;
                 self.emit(&format!("}} {};", name));
             }
-            Decl::MicroDecl { .. } => {
-                // Micros are 100% compile-time pure AST replacements; zero C++ code is generated for their definitions.
-            }
             Decl::ExternFnDecl { name, alias, .. } => {
                 if let Some(alias_name) = alias {
                     self.emit(&format!("#define {} {}", alias_name, name));
@@ -752,30 +763,9 @@ impl CodeGenerator {
                 self.indent_level -= 1;
                 self.emit("}");
             }
-            Decl::MacroDecl {
-                name, params, body, ..
-            } => {
-                let mut param_strs = Vec::new();
-                for param in params {
-                    let cpp_t = if matches!(param.type_node, BaseType::Unknown) {
-                        "auto".to_string()
-                    } else {
-                        type_to_cpp(&param.type_node)
-                    };
-                    param_strs.push(format!("{} {}", cpp_t, param.name));
-                }
-
-                self.emit(&format!(
-                    "inline void {}({}) {{",
-                    name,
-                    param_strs.join(", ")
-                ));
-                self.indent_level += 1;
-                for s in body {
-                    self.visit_statement(s);
-                }
-                self.indent_level -= 1;
-                self.emit("}");
+            Decl::MacroDecl { .. } => {
+                // Macros are pure compile-time AST replacements and expansions.
+                // Never emit standalone C++ functions for them.
             }
             _ => {
                 self.emit(&format!("// TODO: unimplemented declaration {:?}", decl));
@@ -783,4 +773,3 @@ impl CodeGenerator {
         }
     }
 }
-

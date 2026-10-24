@@ -1,0 +1,130 @@
+// EXPECT: --- Testing Dynamic Enum Indexing & Default Variant ---
+// EXPECT: Matched Html variant: <h1>Hello</h1>
+// EXPECT: Matched Json variant: {"key": 123}
+// EXPECT: Fallback to Default Raw variant: unknown format
+// EXPECT: Dynamic variable ext=toml matched Toml: [table]
+// EXPECT: Dynamic variable ext=custom matched Default Raw: something
+// EXPECT: --- All Macro and Comptime Tests Passed Successfully ---
+
+import std::fmt;
+import std::types;
+import std::document;
+import std::time;
+
+using document;
+
+fn test_dynamic_enum() {
+    println("--- Testing Dynamic Enum Indexing & Default Variant ---");
+    using Document;
+
+    DocumentPayload p1;
+    p1.name = "page.html";
+    p1.content = "<h1>Hello</h1>";
+    p1.created = Time::now();
+    p1.updated = Time::now();
+
+    Document d1 = Document["html"](p1);
+    match (d1) -> {
+        Html(p) => {
+            println("Matched Html variant: ", p.content);
+        }
+        _ => {
+            println("Failed to match Html");
+        }
+    }
+
+    DocumentPayload p2;
+    p2.name = "data.json";
+    p2.content = "{\"key\": 123}";
+    p2.created = Time::now();
+    p2.updated = Time::now();
+
+    Document d2 = Document["json"](p2);
+    match (d2) -> {
+        Json(p) => {
+            println("Matched Json variant: ", p.content);
+        }
+        _ => {
+            println("Failed to match Json");
+        }
+    }
+
+    DocumentPayload p3;
+    p3.name = "data.xyz";
+    p3.content = "unknown format";
+    p3.created = Time::now();
+    p3.updated = Time::now();
+
+    Document d3 = Document["xyz"](p3);
+    match (d3) -> {
+        Raw(p) => {
+            println("Fallback to Default Raw variant: ", p.content);
+        }
+        _ => {
+            println("Failed to fallback to Raw");
+        }
+    }
+
+    str ext_toml = "toml";
+    DocumentPayload p4;
+    p4.name = "config.toml";
+    p4.content = "[table]";
+    p4.created = Time::now();
+    p4.updated = Time::now();
+
+    Document d4 = Document[ext_toml](p4);
+    match (d4) -> {
+        Toml(p) => {
+            println("Dynamic variable ext=toml matched Toml: ", p.content);
+        }
+        _ => {
+            println("Failed to match Toml");
+        }
+    }
+
+    str ext_custom = "custom_unregistered_extension";
+    DocumentPayload p5;
+    p5.name = "custom.ext";
+    p5.content = "something";
+    p5.created = Time::now();
+    p5.updated = Time::now();
+
+    Document d5 = Document[ext_custom](p5);
+    match (d5) -> {
+        Raw(p) => {
+            println("Dynamic variable ext=custom matched Default Raw: ", p.content);
+        }
+        _ => {
+            println("Failed to fallback to Raw for custom ext");
+        }
+    }
+}
+
+macro _ffi_scope_ @[name : str]#{inner : str} -> {
+    return in {
+        inner;
+    };
+}
+
+macro _all_ *[inner : str] -> {
+    return in {
+        inner;
+    };
+}
+
+macro _bracketed_ ^[inner : str] -> {
+    return in {
+        inner;
+    };
+}
+
+macro _exclusion_ [[{}, []] ^ [inner : str]] -> {
+    return in {
+        inner;
+    };
+}
+
+fn main() {
+    test_dynamic_enum();
+    println("--- All Macro and Comptime Tests Passed Successfully ---");
+}

@@ -6,6 +6,8 @@ extern @c :: {
     fn fast_sin(x: float64) -> float64;
     fn fast_cos(x: float64) -> float64;
     fn fast_tan(x: float64) -> float64;
+    fn fast_floor(x: float64) -> float64;
+    fn fast_ceil(x: float64) -> float64;
 }
 public fn sqrt<T>(x: T) -> float64 {
     return fast_sqrt(x as float64);
@@ -36,4 +38,12 @@ public fn abs<T>(x: T) -> T {
         return -x;
     }
     return x;
+}
+
+public fn floor<T>(x: T) -> float64 {
+    return fast_floor(x as float64);
+}
+
+public fn ceil<T>(x: T) -> float64 {
+    return fast_ceil(x as float64);
 }

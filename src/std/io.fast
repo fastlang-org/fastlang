@@ -1,7 +1,10 @@
 // FastLang Standard Library: Layered File System I/O
 import std::types;
 import std::error;
+import std::document;
 import @c "clib/io.h";
+
+using document;
 
 extern @c :: {
     fn fast_open(path: str, flags: int32, mode: int32) -> int32;
@@ -92,10 +95,15 @@ public fn to_utf8(u: uchar[]) -> str {
     return @c::fast_uchar_to_utf8(u);
 }
 
-// Layer 2: High-level DocumentType open with Unicode support & extension extraction
-public fn open(path: str) -> DocumentType {
-    uchar ucontent[] = read_all_u(path);
+// Layer 2: High-level Document open with extension extraction & timestamps
+public fn open(path: str) -> Document {
     str content = read_all(path);
+    DocumentPayload payload;
+    payload.name = path;
+    payload.content = content;
+    payload.created = Time::now();
+    payload.updated = Time::now();
+
     int32 dot_idx = -1;
     for (int32 i = 0; i < path.len; i = i + 1) {
         if (path[i] == '.') {
@@ -109,39 +117,17 @@ public fn open(path: str) -> DocumentType {
         for (int32 k = 0; k < ext_len; k = k + 1) {
             ext[k] = path[dot_idx + 1 + k];
         }
-
-        if (ext == "json") {
-            JsonDocument j = new JsonDocument();
-            j.set_content(content);
-            j.set_ucontent(ucontent);
-            j.set_extension("json");
-            return DocumentType::Json(j);
-        } else if (ext == "html" || ext == "htm") {
-            HtmlDocument h = new HtmlDocument();
-            h.set_content(content);
-            h.set_ucontent(ucontent);
-            h.set_extension("html");
-            return DocumentType::Html(h);
-        } else {
-            Document d = new Document();
-            d.set_content(content);
-            d.set_ucontent(ucontent);
-            d.set_extension(ext);
-            return DocumentType::Raw(d);
-        }
+        return Document[ext](payload);
     }
 
-    Document d = new Document();
-    d.set_content(content);
-    d.set_ucontent(ucontent);
-    return DocumentType::Raw(d);
+    return Document::Raw(payload);
 }
 
 public fn open(path: str, flags: int32, mode: int32 := 0) -> int32 {
     return sys_open(path, flags, mode);
 }
 
-public fn open_document(path: str) -> DocumentType {
+public fn open_document(path: str) -> Document {
     return open(path);
 }
 

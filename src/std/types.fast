@@ -21,205 +21,6 @@ public enum System -> {
     MacOS,
 }
 
-public blueprint document -> {
-    char content[];
-    uchar ucontent[];
-    char ext[] = "txt";
-}
-
-public impl document -> {
-    fn get_content() -> str {
-        return this.content;
-    }
-    fn set_content(c: str) -> void {
-        this.content = c;
-    }
-    fn get_ucontent() -> uchar[] {
-        return this.ucontent;
-    }
-    fn set_ucontent(u: uchar[]) -> void {
-        this.ucontent = u;
-    }
-    fn as_str() -> str {
-        return this.content;
-    }
-    fn as_ustr() -> uchar[] {
-        return this.ucontent;
-    }
-    fn get_extension() -> str {
-        return this.ext;
-    }
-    fn set_extension(e: str) -> void {
-        this.ext = e;
-    }
-    fn len() -> usize {
-        if (this.ucontent.len > 0) {
-            return this.ucontent.len;
-        }
-        return this.content.len;
-    }
-    handle -> {
-        fn display() -> str {
-            return this.content;
-        }
-        fn extension() -> char[] {
-            return this.ext;
-        }
-    }
-}
-
-public class Document extends document -> {
-}
-
-public class HtmlDocument extends document -> {
-    public -> {
-        fn render() -> str {
-            return this.as_str();
-        }
-        fn render_u() -> uchar[] {
-            return this.as_ustr();
-        }
-    }
-    handle -> {
-        fn display() -> str {
-            return this.as_str();
-        }
-        fn extension() -> char[] {
-            return this.ext;
-        }
-    }
-}
-
-public class JsonDocument extends document -> {
-    public -> {
-        fn as_str() -> str {
-            return this.get_content();
-        }
-    }
-    handle -> {
-        fn display() -> str {
-            return this.as_str();
-        }
-        fn extension() -> char[] {
-            return this.ext;
-        }
-        fn index_access(key: str) -> str {
-            str c = this.as_str();
-            int32 c_len = c.len;
-            int32 k_len = key.len;
-            if (c_len == 0 || k_len == 0) {
-                return "";
-            }
-
-            int32 match_idx = -1;
-            for (int32 i = 0; i + k_len + 2 <= c_len; i = i + 1) {
-                if (c[i] == '"') {
-                    bool matched = true;
-                    for (int32 k = 0; k < k_len; k = k + 1) {
-                        if (c[i + 1 + k] != key[k]) {
-                            matched = false;
-                            break;
-                        }
-                    }
-                    if (matched && c[i + 1 + k_len] == '"') {
-                        match_idx = i + 2 + k_len;
-                        break;
-                    }
-                }
-            }
-
-            if (match_idx == -1) {
-                return "";
-            }
-
-            int32 pos = match_idx;
-            while (pos < c_len) {
-                char ch = c[pos];
-                if (ch == ' ') { pos = pos + 1; }
-                else if (ch == '\t') { pos = pos + 1; }
-                else if (ch == '\r') { pos = pos + 1; }
-                else if (ch == '\n') { pos = pos + 1; }
-                else if (ch == ':') { pos = pos + 1; }
-                else { break; }
-            }
-
-            if (pos >= c_len) {
-                return "";
-            }
-
-            if (c[pos] == '"') {
-                pos = pos + 1;
-                int32 start = pos;
-                while (pos < c_len && c[pos] != '"') {
-                    pos = pos + 1;
-                }
-                int32 val_len = pos - start;
-                char res[] = new char[](val_len);
-                for (int32 j = 0; j < val_len; j = j + 1) {
-                    res[j] = c[start + j];
-                }
-                return res;
-            } else {
-                int32 start = pos;
-                while (pos < c_len) {
-                    char ch = c[pos];
-                    if (ch == ',') { break; }
-                    if (ch == '}') { break; }
-                    if (ch == ']') { break; }
-                    if (ch == ' ') { break; }
-                    if (ch == '\t') { break; }
-                    if (ch == '\r') { break; }
-                    if (ch == '\n') { break; }
-                    pos = pos + 1;
-                }
-                int32 val_len = pos - start;
-                char res[] = new char[](val_len);
-                for (int32 j = 0; j < val_len; j = j + 1) {
-                    res[j] = c[start + j];
-                }
-                return res;
-            }
-        }
-    }
-}
-
-public enum DocumentType -> {
-    Html(HtmlDocument),
-    Json(JsonDocument),
-    Safe(document),
-    Raw(document),
-}
-
-public impl DocumentType -> {
-    fn as_str() -> str {
-        match this {
-            Html(d) => return d.as_str(),
-            Json(d) => return d.as_str(),
-            Safe(d) => return d.as_str(),
-            Raw(d) => return d.as_str(),
-        }
-        return "";
-    }
-    fn as_ustr() -> uchar[] {
-        match this {
-            Html(d) => return d.as_ustr(),
-            Json(d) => return d.as_ustr(),
-            Safe(d) => return d.as_ustr(),
-            Raw(d) => return d.as_ustr(),
-        }
-        return u"";
-    }
-    fn extension() -> str {
-        match this {
-            Html(d) => return d.get_extension(),
-            Json(d) => return d.get_extension(),
-            Safe(d) => return d.get_extension(),
-            Raw(d) => return d.get_extension(),
-        }
-        return "";
-    }
-}
-
 public blueprint shared -> {
     int32 owners = 0;
 }
@@ -237,6 +38,11 @@ public blueprint MemberType -> {
     type ty;
 }
 
+public @compile :: {
+    set access<T>(T, MemberType) -> unknown*;
+    set access<T>(T, str) -> unknown*;
+}
+
 public blueprint pointer<T> -> {
     T* ptr = undefined;
     shared* counter = undefined;
@@ -252,6 +58,16 @@ public blueprint mutRef<...T> -> {
     type inner = T;
     type expect[] = [...T];
     share counter if (this.ptr == other.ptr);
+}
+
+public blueprint unique<T> -> {
+    T* ptr = undefined;
+    shared* counter = undefined;
+    share counter if (this.ptr == other.ptr) {
+        if (this.counter.owners > 1) {
+            other.ptr = undefined;
+        }
+    }
 }
 
 public blueprint iterator<T> -> {
@@ -273,8 +89,6 @@ public impl iterator<T> -> {
     }
 }
 
-public define str = array<char>;
-public define ustr = array<uchar>;
 public impl Option<T> -> {
     fn is_Some() -> bool {
         match this {
@@ -546,6 +360,36 @@ public impl char -> {
         }
         return this;
     }
+
+    fn to_int() -> int32 {
+        if (this >= '0' && this <= '9') {
+            return (this as int32) - ('0' as int32);
+        }
+        return this as int32;
+    }
+
+    fn to_hex() -> str {
+        int32 v = this as int32;
+        int32 hi = v / 16;
+        int32 lo = v % 16;
+        char h1 = if (hi < 10) (('0' as int32) + hi) as char else (('a' as int32) + (hi - 10)) as char;
+        char h2 = if (lo < 10) (('0' as int32) + lo) as char else (('a' as int32) + (lo - 10)) as char;
+        char res[] = new char[](2);
+        res[0] = h1;
+        res[1] = h2;
+        return res;
+    }
+
+    fn to_bin() -> str {
+        int32 v = this as int32;
+        char res[] = new char[](8);
+        int32 rem = v;
+        for (int32 i = 7; i >= 0; i = i - 1) {
+            res[i] = if ((rem % 2) == 1) '1' else '0';
+            rem = rem / 2;
+        }
+        return res;
+    }
 }
 
 public impl array<char> -> {
@@ -613,6 +457,36 @@ public impl array<char> -> {
             return None;
         }
         return Some(this[this.len - 1]);
+    }
+
+    fn to_hex() -> str {
+        if (this.len == 0) {
+            return "";
+        }
+        char res[] = new char[](this.len * 2);
+        for (usize i = 0; i < this.len; i = i + 1) {
+            int32 v = this[i] as int32;
+            int32 hi = v / 16;
+            int32 lo = v % 16;
+            res[i * 2] = if (hi < 10) (('0' as int32) + hi) as char else (('a' as int32) + (hi - 10)) as char;
+            res[i * 2 + 1] = if (lo < 10) (('0' as int32) + lo) as char else (('a' as int32) + (lo - 10)) as char;
+        }
+        return res;
+    }
+
+    fn to_bin() -> str {
+        if (this.len == 0) {
+            return "";
+        }
+        char res[] = new char[](this.len * 8);
+        for (usize i = 0; i < this.len; i = i + 1) {
+            int32 rem = this[i] as int32;
+            for (int32 b = 7; b >= 0; b = b - 1) {
+                res[i * 8 + b] = if ((rem % 2) == 1) '1' else '0';
+                rem = rem / 2;
+            }
+        }
+        return res;
     }
 
     fn as_str() -> str {

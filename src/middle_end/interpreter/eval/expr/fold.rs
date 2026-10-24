@@ -1,3 +1,4 @@
+use crate::frontend::parser::ast;
 use crate::frontend::parser::ast::*;
 use crate::middle_end::interpreter::env::InterpreterEnv;
 use crate::middle_end::interpreter::eval::is_literal;
@@ -185,6 +186,9 @@ impl Interpreter {
                                 property: Box::new(Expr::Identifier(variant.to_string())),
                             };
                             return Ok(());
+                        } else if prop_name == "time" {
+                            *expr = super::builtins::create_comptime_time_expr();
+                            return Ok(());
                         }
                     }
                 }
@@ -246,6 +250,7 @@ impl Interpreter {
                                     env: InterpreterEnv::with_parent(self.env.clone()),
                                     functions: self.functions.clone(),
                                     micros: self.micros.clone(),
+                                    macros: self.macros.clone(),
                                     var_types: self.var_types.clone(),
                                     current_env: self.current_env.clone(),
                                     fn_overloads: self.fn_overloads.clone(),
@@ -347,6 +352,75 @@ impl Interpreter {
                     }
                 }
             }
+            Expr::MacroCall { callee, args } => {
+                for a in args.iter_mut() {
+                    self.fold_expr(a)?;
+                }
+
+                let macro_name = match &**callee {
+                    Expr::Identifier(id) => Some(id.clone()),
+                    Expr::NamespaceAccess {
+                        namespace,
+                        property,
+                    } => {
+                        if let Expr::Identifier(p) = &**property {
+                            Some(format!("{}::{}", namespace, p))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                if let Some(ref name) = macro_name {
+                    let candidates = vec![
+                        name.clone(),
+                        name.trim_start_matches('$').to_string(),
+                        format!("${}", name),
+                        name.split("::").last().unwrap_or(name).to_string(),
+                        name.split("::").last().unwrap_or(name).trim_start_matches('$').to_string(),
+                    ];
+                    let mut macro_match = None;
+                    for cand in &candidates {
+                        if let Some(overloads) = self.macros.get(cand) {
+                            if let Some((params, body)) = overloads.iter().find(|(p, _)| p.len() == args.len()) {
+                                macro_match = Some((params.clone(), body.clone()));
+                                break;
+                            }
+                        }
+                    }
+                    if let Some((params, body)) = macro_match {
+                        let ret_expr = body.iter().find_map(|s| match s {
+                            Stmt::ReturnStmt(Some(Expr::BlockExpr { statements, final_expr })) => {
+                                if let Some(fe) = final_expr {
+                                    Some((**fe).clone())
+                                } else {
+                                    statements.iter().find_map(|st| match st {
+                                        Stmt::ReturnStmt(Some(e))
+                                        | Stmt::ExpressionStmt(e)
+                                        | Stmt::CallStmt(e) => Some(e.clone()),
+                                        _ => None,
+                                    })
+                                }
+                            }
+                            Stmt::ReturnStmt(Some(e)) => Some(e.clone()),
+                            Stmt::ExpressionStmt(e) | Stmt::CallStmt(e) => Some(e.clone()),
+                            _ => None,
+                        });
+
+                        if let Some(r_expr) = ret_expr {
+                            let param_map = self.build_micro_param_map(&params, args);
+                            let mut substituted = substitute_expr(&r_expr, &param_map);
+                            self.fold_expr(&mut substituted)?;
+                            *expr = substituted;
+                            return Ok(());
+                        } else {
+                            *expr = Expr::LiteralVoid;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
             Expr::Call {
                 callee,
                 generics,
@@ -386,6 +460,9 @@ impl Interpreter {
                                     namespace: "System".to_string(),
                                     property: Box::new(Expr::Identifier(variant.to_string())),
                                 };
+                                return Ok(());
+                            } else if prop_name == "time" {
+                                *expr = super::builtins::create_comptime_time_expr();
                                 return Ok(());
                             }
                         }
@@ -439,6 +516,75 @@ impl Interpreter {
                     }
                 }
 
+                // Expand macro calls in expression contexts if called via Expr::Call
+                let macro_info = {
+                    let m_name = match &**callee {
+                        Expr::Identifier(id) => Some(id.clone()),
+                        Expr::NamespaceAccess {
+                            namespace,
+                            property,
+                        } => {
+                            if let Expr::Identifier(p) = &**property {
+                                Some(format!("{}::{}", namespace, p))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(ref name) = m_name {
+                        let candidates = vec![
+                            name.clone(),
+                            name.trim_start_matches('$').to_string(),
+                            format!("${}", name),
+                            name.split("::").last().unwrap_or(name).to_string(),
+                            name.split("::").last().unwrap_or(name).trim_start_matches('$').to_string(),
+                        ];
+                        let mut found = None;
+                        for cand in &candidates {
+                            if let Some(overloads) = self.macros.get(cand) {
+                                if let Some((params, body)) = overloads.iter().find(|(p, _)| p.len() == args.len()) {
+                                    found = Some((params.clone(), body.clone()));
+                                    break;
+                                }
+                            }
+                        }
+                        found
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some((params, body)) = macro_info {
+                    let ret_expr = body.iter().find_map(|s| match s {
+                        Stmt::ReturnStmt(Some(Expr::BlockExpr { statements, final_expr })) => {
+                            if let Some(fe) = final_expr {
+                                Some((**fe).clone())
+                            } else {
+                                statements.iter().find_map(|st| match st {
+                                    Stmt::ReturnStmt(Some(e))
+                                    | Stmt::ExpressionStmt(e)
+                                    | Stmt::CallStmt(e) => Some(e.clone()),
+                                    _ => None,
+                                })
+                            }
+                        }
+                        Stmt::ReturnStmt(Some(e)) => Some(e.clone()),
+                        Stmt::ExpressionStmt(e) | Stmt::CallStmt(e) => Some(e.clone()),
+                        _ => None,
+                    });
+                    if let Some(r_expr) = ret_expr {
+                        let param_map = self.build_micro_param_map(&params, args);
+                        let mut substituted = substitute_expr(&r_expr, &param_map);
+                        self.fold_expr(&mut substituted)?;
+                        *expr = substituted;
+                        return Ok(());
+                    } else {
+                        *expr = Expr::LiteralVoid;
+                        return Ok(());
+                    }
+                }
+
                 // Property method calls on types, e.g. typeof(id).printable(), typeof(id).castable_to(float64)
                 if let Expr::PropertyAccess { object, property } = &mut **callee {
                     self.fold_expr(object)?;
@@ -476,27 +622,27 @@ impl Interpreter {
                                     return Ok(());
                                 }
                             }
-                            "primitive"  => {
+                            "primitive" => {
                                 *expr = Expr::LiteralBool(ft.is_primitive());
                                 return Ok(());
                             }
-                            "pointer"  => {
+                            "pointer" => {
                                 *expr = Expr::LiteralBool(ft.is_pointer());
                                 return Ok(());
                             }
-                            "array"  => {
+                            "array" => {
                                 *expr = Expr::LiteralBool(ft.is_array());
                                 return Ok(());
                             }
-                            "constant"  => {
+                            "constant" => {
                                 *expr = Expr::LiteralBool(ft.is_constant());
                                 return Ok(());
                             }
-                            "runtime"  => {
+                            "runtime" => {
                                 *expr = Expr::LiteralBool(ft.is_runtime());
                                 return Ok(());
                             }
-                            "comptime"  => {
+                            "comptime" => {
                                 *expr = Expr::LiteralBool(ft.is_comptime());
                                 return Ok(());
                             }
@@ -596,6 +742,32 @@ impl Interpreter {
                     }
                 }
                 self.fold_expr(callee)?;
+                let folded_opt = {
+                    let should_try_fold = match &**callee {
+                        Expr::PropertyAccess { property, .. } => {
+                            matches!(property.as_str(), "select" | "insert" | "get_content")
+                        }
+                        Expr::Identifier(ref fn_name) => {
+                            matches!(fn_name.as_str(), "create_ident")
+                                || fn_name.starts_with("@compile::")
+                        }
+                        _ => false,
+                    };
+                    if should_try_fold {
+                        let temp_expr = Expr::Call {
+                            callee: callee.clone(),
+                            generics: generics.clone(),
+                            args: args.clone(),
+                        };
+                        self.eval_expr(&temp_expr).ok()
+                    } else {
+                        None
+                    }
+                };
+                if let Some(folded) = folded_opt {
+                    *expr = folded;
+                    return Ok(());
+                }
 
                 let fn_name = match &**callee {
                     Expr::NamespaceAccess {
@@ -637,7 +809,7 @@ impl Interpreter {
                     let target_type = generics
                         .first()
                         .cloned()
-                        .unwrap_or(BaseType::Int(crate::frontend::parser::ast::Size::S32));
+                        .unwrap_or(BaseType::Int(ast::Size::S32));
                     if CompilerIntrinsics::is_numeric_type(&target_type) {
                         let evaled_args: Vec<Expr> = args
                             .iter()
@@ -726,6 +898,7 @@ impl Interpreter {
                         env: InterpreterEnv::with_parent(self.env.clone()),
                         functions: self.functions.clone(),
                         micros: self.micros.clone(),
+                        macros: self.macros.clone(),
                         var_types: self.var_types.clone(),
                         current_env: self.current_env.clone(),
                         fn_overloads: self.fn_overloads.clone(),
@@ -826,6 +999,7 @@ impl Interpreter {
                                     env: InterpreterEnv::with_parent(self.env.clone()),
                                     functions: self.functions.clone(),
                                     micros: self.micros.clone(),
+                                    macros: self.macros.clone(),
                                     var_types: self.var_types.clone(),
                                     current_env: self.current_env.clone(),
                                     fn_overloads: self.fn_overloads.clone(),

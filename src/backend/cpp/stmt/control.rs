@@ -3,6 +3,7 @@ use std::mem::{replace, take};
 use crate::backend::cpp::generator::CodeGenerator;
 use crate::backend::cpp::stmt::types::*;
 use crate::frontend::parser::ast::*;
+use crate::middle_end::semantic::analyzer::has_compile_directive;
 
 impl CodeGenerator {
     pub(crate) fn format_param(&mut self, param: &Param) -> String {
@@ -119,7 +120,7 @@ impl CodeGenerator {
                 }
                 self.indent_level -= 1;
                 if let Some(eb) = else_block {
-                    if !crate::middle_end::semantic::analyzer::has_compile_directive(eb) {
+                    if !has_compile_directive(eb) {
                         self.emit("} else {");
                         self.indent_level += 1;
                         for s in eb {

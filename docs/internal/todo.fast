@@ -1906,7 +1906,7 @@ blueprint unique<T> -> {
     raw_ptr<Id> id_counter = undefined;
     int32 id = 0;
     type inner = T;
-    share id_counter if (this.ptr != other.ptr && this.inner == other.inner) then {
+    share id_counter if (this.ptr != other.ptr && this.inner == other.inner){
         this.id = id_counter.counter;
     };
 }
@@ -1918,8 +1918,13 @@ micro x = () -> {
     };
 };
 x()(); // the 1st () will call the micro x and the 2nd () will call the ghost block
-// we will add a way to call blueprints and classes and structs in <> way like in react
+// it will be like this
+{
+        //i am an inserted ghost block and i will be called after being inserted by the second ()
+        println("called");
+}();
 
+// we will add a way to call blueprints and classes and structs in <> way like in react
 // we may allow any object have render method (we will make it a handle for it) an return the needed typed doc (html, json, etc)
 // and for each doc we may have a unique way for it 
 // ex :
@@ -2070,73 +2075,6 @@ model User {
     //it will like prisma 
 }
 }
-// to make something like that we need to difine rules for making an custom (foriegn lang)
-// mabye it will something like a handle or what ever 
-// also for macro 
-// we will allow more custminzation for it 
-macro makeup_if -> (
-    set this.type = condition;
-    set this as con;
-){
-    set this.type as scope;
-    set inner {scope} if(con){
-        println("if");
-    };
-    set return as ret = auto;
-    set super as sp = function; //it will run inner like a fn
-}{
-    set inner {scope} if(!con){
-        println("else");
-    };
-    set return = ret;
-    set super = sp;
-};
-int x = 10;
-makeup_if(x == 10){
-    println("x = 10");
-}{
-    println("unr");
-} // that will print "if\n" then "x = 10\n"
-makeup_if(x > 15){
-    println("unr");
-}{
-    println("x > 15");
-} // that will print "else\n" then "x > 15\n"
-
-// there will be more custaminzation but we will leave that for that time 
-// we will add shifts >> << in 0.1.6-alpha also 
-// more ex for macro update  , 
-macro &_gh(c : int32){
-       set counter := c ? 0 : c;
-}->&if[
-   set this as keyword::if;
-   set override = true; // to set the override the if scope 
-    ][
-  set  this.type = condition;
-  set this as con;
-]{
- set inner {scope} if(con);
- set handle += {
-    fn error(e) -> void { //todo: same as catch 
-       println(e +" this happened in if ")
-    }
- }
-}&else if(&if){
-    &_gh(&_gh[counter] + 1);
-}else{
- set inner {scope} if(!con);
- set handle += {
-    fn error(e) -> void { //todo: same as catch 
-       println(e +" this happened in if ")
-    }
- }
-}
-// to call this we will do this
-if(x == 10){  // so that will override the if scope and make it handle errors for example
-    throw new Error("x = 10");
-}else if(x > 15){
-    throw new Error("x > 15");
-}
 // we need to add more syscall (time , window , ..)
 // we will support lua , js , css , sql , cpp , c , asm 
 // we will create a way to support tailwind css or we maay make something like it 
@@ -2263,3 +2201,991 @@ enum X use uint8 { // or enum X : uint8 {
 }
 
  print(X[0]); // that will print A
+
+// to make something like that we need to difine rules for making an custom (foriegn lang)
+// mabye it will something like a handle or what ever 
+// also for macro 
+// we will allow more custminzation for it 
+macro makeup_if(
+    in {
+      bool con;
+    };
+){
+    set inner {scope} if(con){
+        println("if");
+    };
+    set return as ret = auto;
+    set super as sp = function; //it will run inner like a fn
+}{
+    set inner {scope} if(!con){
+        println("else");
+    };
+    set return = ret;
+    set super = sp;
+};
+int x = 10;
+makeup_if(x == 10){
+    println("x = 10");
+}{
+    println("unr");
+} // that will print "if\n" then "x = 10\n"
+makeup_if(x > 15){
+    println("unr");
+}{
+    println("x > 15");
+} // that will print "else\n" then "x > 15\n"
+
+// there will be more custaminzation but we will leave that for that time 
+// we will add shifts >> << in 0.1.6-alpha also 
+// more ex for macro update  , 
+macro &_(
+ in {
+    int32 counter;
+ };
+)&if[
+   set this as keyword::if;
+   set override = true; // to set the override the if scope 
+    ][
+  set  this.type = condition;
+  set this as con;
+]{
+ set inner {scope} if(con);
+ set handle += {
+    fn error(e) -> void { //todo: same as catch 
+       println(e +" this happened in if ")
+    }
+ }
+}&else if(&if){
+    &_gh(&_gh[counter] + 1);
+}else{
+ set inner {scope} if(!con);
+ set handle += {
+    fn error(e) -> void { //todo: same as catch 
+       println(e +" this happened in if ")
+    }
+ }
+}
+// to call this we will do this
+if(x == 10){  // so that will override the if scope and make it handle errors for example
+    throw new Error("x = 10");
+}else if(x > 15){
+    throw new Error("x > 15");
+}
+macro &_[
+//   set this.type = params;
+   in {
+      number x;
+   }
+]&[..][
+ //  set this.type = params;
+   in {
+      number y;
+   }
+] -> {
+    range(x, y);
+};
+// for int x in 1..10 { }
+// [[]]
+
+// the macro new support
+// first it will be two parts a one for the syntax and the other for the code it self it will run
+// macro name <synax block>  -> {inner code block}
+// for supporting generics it will be <T> then () a params block 
+// also the {} block can be micro block (inserted)
+// [] mean a no () or {} or [] 
+// to get [] you need to write [[]]
+// &_ means ghost
+// & before new to use it in the syntax 
+macro &_ &new<T>[
+    in {
+        T x;
+    }
+] ->  // we can here add a return type
+{
+    set override = true; // to allow us override the existing syntax for the used keywords (new)
+    set in as {micro}; // we can set any time through as , this line mean this scope will be run like a micro mean by that it will be inserted in compile time
+    public in {   // we can have a public block that will run very time we call the macro
+        new x;
+    };  
+    private in { 
+        @compile::print(x);
+    }; 
+}
+int* x = new int(10); // will print 10 in compile time
+macro &_
+&&{
+//&& for block that will declare some needed vars before the syntax block
+     set bl as {[(fn , fn)]};
+     enum Sc {
+         If,
+         Else,
+     }
+     set count := 0;
+}&&while(true){
+     &&bl{[count]=(
+    &if[
+    set in as {condition};
+    in {
+        bool con;
+    };
+] {
+    set in as {fn};
+    &&{
+        set sc as {Sc::If};
+    }
+}
+),
+(&else &&{
+    if(&if){
+        &&count += 1;
+        continue;
+    }
+}
+{
+    set in as {fn};
+    &&{
+        set sc as {Sc::Else};
+        break;
+    }
+}
+)}
+} -> auto {
+   for f in bl {
+       if (f[0].sc == Sc::If && f[0].con) {
+           f[0]();
+       }else if(f[0].sc == Sc::Else){
+           f[0]();
+           break;
+       }else if(f[1].sc == Sc::Else){
+           f[0]();
+       }else{
+           continue;
+       }
+   }
+}
+
+//
+// &_  , _ref_cll_  , __
+// %if{} 
+// &if  
+// @[ffi]   // @[]
+
+macro _lang_@[ffi as {str}]{
+    set this.type as FFI;
+    set in as {str};
+} -> {
+    return Ducment{
+        extension = "."+ffi;
+        content = in;
+    }
+}
+
+// so we  will not use &_ because is not good way we only needed it to declare a micro without a name
+// but why we can't name it and make only the name it not needed by putting _ before it and after it
+// that will allow us to easily call it by it name  (_name_) and also withut the name
+// also  && is not clear for the user so we will use % instead
+// the use for && (% now) is to allow to add some logic and stmts in the declaration part of the macro
+// we ofcourse will limit what we can do with it
+// we will add @  as a seperate token for
+// to make the making a ffi block easy for us without it hardcoded
+// & it will allow the user to use a keyword in the syntax of a macro
+// in {}  : in is what will be inside the block
+// we can set type with "as" 
+// "in" can have a type
+// we mabye to make it easier allow to write params in easy way 
+// <> : generics when come before params block , it will be like the fn generics
+// so it will take the type of the generics from the params block and the unused generics will be required
+// but if it came in where else it can be a normal block
+// to use any op in the syntax block you will need to put it in &[] 
+//-> : is what seperate the syntax block (decl) from the code block (impl)
+// it can have a return type after it
+// after the -> can {} for the code block that will run the actual thing
+macro _new_&new<T>[X:T] -> {
+    set override = true;
+    set this as {micro};
+    println(X);
+    return in {
+        new X;
+    };
+};
+macro _inline_if_ [
+    set this as {condition} => cond;
+]&[?][
+    set this as {fn} => ifside;
+]&[:][
+    set this as {fn} => elseside;
+]-> {
+    return in {
+        if (cond) ifside() else elseside();
+    }
+};
+macro _ffi_scope_ &[@][
+    set this as {str} => name;
+]&[->] %or &[] {
+    set this as {if(name != "f") extern else fn} => inner;
+} -> {
+
+};
+macro _fcomponant_ <
+    set this as {str} => name;
+>[
+
+]&[<]&[/][
+    set this as {str} => name;
+]&[>]->{
+
+}
+macro emit [tag: str, code: int32] -> {
+    // will be compiletime
+   return in {
+    println("[", tag, "] Code: ", code);
+   }
+}
+emit "STATUS" 200;
+//emit str int32;
+macro emit [tag: str, code: int32] -> {
+    while runtime;
+    println("[", tag, "] Code: ", code);
+}
+//to make a params block it by this
+//{x :int32} , [x : int32] , [[x :int32]] , <x : int32> or (x : int32) 
+// {10} , 10 , [10] , <10> , (10)
+// to use it with generics
+//<T>{x :T} , <T>[x : T] , <T>[[x :T]] , <T><x : T> or <T>(x : T)
+// so we add some rules also and some changes
+// will add a new token '`' for opening and closing a extern block other programming langs
+// we may write the new syntax like that 
+@html `
+<html>
+    <head></head>
+    <body>
+        <h1>Hello, world!</h1>
+    </body>
+</html>
+`
+// so to open an extern block you will open it with ` and close it also with it
+// to define a macro take a extern block 
+macro _lang_@[ffi : str]`[inner : extern]` -> {
+    return Document{
+        extension = "."+ffi,
+        content = inner,
+    }
+}
+// we may change it to !{} or !{{}}
+// it will be similar to the rust (view! and cpp!) but we removed (view,cpp) and kept ! 
+&[!]{} 
+#{}
+ // ^ this needed to be added as a new token
+#{}
+[{}] 
+[#{}] 
+&[#] // not supported yet
+&[#][]
+&[#]<>
+&[#]()
+&[#][[]]
+{{}}
+@html #{}
+&[#]{}
+macro _lang_&[@][ffi :str]#{inner}->{
+  return in {
+     Document{
+        extension = "."+ffi,
+        content = inner,
+     }
+  }
+}
+&[..] , &[...] &[||] , &[,] , &[<<] , &[>>] , &[+] , &[-] ,&[_] , &[*]
+[{}] -> {}
+[[{}]] -> [{}]
+// || it will supported as scope like this
+macro _better_lam_ <...T>|...args: ...T||inner : fn| -> {
+    return in {
+        fn<...T>(...args: ...T)-> unknown {inner};
+    }
+}
+betterlm := |x:int,y:int||x + y|;
+// it will be
+betterlm := fn(x:int,y:int) -> unknown {
+    return x + y;
+}; // phase 1 
+// then
+betterlm := fn(x:int,y:int) -> int {
+    return x + y;
+}; // phase 2
+macro useoverrode &new<T>[x :T] -> {
+    return in {
+        new x;
+    };
+}
+int* x = useoverrode new int(10);
+ // %or || 
+ // ...
+ set _scope_[inner] = [{ %or [ %or ( %or [[] [inner] [} %or ] %or ) ]]]
+ macro _l_ _scope_[]
+ macro _ifline_[[{(|con : bool|)}]]&[?][[{(|ife : expr|)}]]&[:][[{(|elsee : expr|)}]] ->{ 
+      return in {
+          if (con) ife else elsee;
+      }
+};
+
+// we will add a new lib for time
+struct Time {
+    int32 year;
+    int32 month;
+    enum Day : int32 {
+       [0] = Sunday,
+        Monday,
+        Tuesday,
+        Wednesday,
+        Thursday,
+        Friday,
+        Saturday,
+    },
+    int32 hour;
+    int32 minute;
+    int32 second;
+    int32 millisecond;
+}
+// we will add a new feature or impl for enum
+// now you can extract the value of the enum
+enum X {
+    [0] = A,
+    B,
+    C,
+}
+int x = X::A as int32; // that will be 0
+// also for some settings that need a support
+enum X {
+    [10] = A, // that will be 10
+    B,        // that will be 11
+    C,        // that will be 12
+}
+enum X : int32 {
+    set i = 10; // we need to add a way to set the value of increment
+    [10] = A, // that will be 10
+    B,        // that will be 20
+    C,        // that will be 30
+}
+// we will add a | for the types but it will work only at runtime
+// add it must be a two branchs to make sure it will work
+fn i_take(x : int32 | int64) -> int32 {
+    return x as int32; // that will work for int32 and int64
+}
+fn i_take(x : int32 | int64) -> int32 {
+   if(typeof(x) == int32) {
+      return x;
+   }else{
+      return x as int32;
+   }
+}
+// we will add "static" for the blueprints (feilds & methods)
+// we will add a new block {{}} that can be in any place and will work separately
+// ex :
+int x = 10 {{
+    int y = 20;
+    println(x + y); // that will print 30   [and y is a local var]
+}}; //1
+int x = {{
+    int y = 20;
+    println(x + y); // that will print error (x is not defined yet)
+}} 10; //2
+int {{
+    int y = 20;
+    println(x + y); // that will print error (x is not defined yet)
+}} x = 10; //3
+int x {{
+    int y = 20;
+    println(x + y); // that will print error (x is not defined yet)
+}} = 10; //4
+// if a inplace block is before a op it will be inserted before the op
+// for 1
+int x = 10;
+{
+    int y = 20;
+    println(x + y);
+}();
+// for 2 
+int x;
+{
+    int y = 20;
+    println(x + y);
+}();
+x = 10;
+// for 3
+// it will be like this
+{
+    int y = 20;
+    println(x + y);
+}();
+int x = 10;
+// for 4
+{
+    int y = 20;
+    println(x + y);
+}();
+int x = 10;
+// we will allow macro to have  str ("" , ``) block ex :
+macro _lang_@[ffi : str]`[inner : extern]` -> {};
+macro _lang_&[@][ffi :str]#{inner : extern}->{};
+macro _lang_&[@][ffi :str]"[inner: extern]"->{};
+// the allowed types for str block will be
+// `` -> extern , str , fn (expr)
+// #{}  -> extern , str , fn (expr)
+// "" -> extern , str , fn (expr)
+
+// new timer
+struct Timer {
+    private {
+    Time start;
+    Time update;
+    Time taken;
+    }
+    static {
+        fn now() -> Time {
+            return Time::now();
+        }
+        fn new() -> Timer {
+            return Timer {
+                start = Time::now(),
+                update = Time::now(),
+                taken = Time {
+                    days = 0,
+                    hours = 0,
+                    minutes = 0,
+                    seconds = 0,
+                    milliseconds = 0,
+                },
+            };
+        }
+    }
+    public {
+        fn reset() -> void {
+            this.start = Time::now();
+            this.update = Time::now();
+        }
+        fn update() -> void {
+            this.update = Time::now();
+        }
+        fn taken() -> Time {
+            this.taken = Time::now() - this.start;
+            return this.taken;
+        }
+
+    }
+}
+timer := Timer::new();
+timer.reset();
+timer.update();
+println(timer.taken());
+
+
+@dependency {
+[dependency]
+sqlite3 = "3.36.0"
+}
+
+macro _dep_@dependency #{ffi : extern} -> /*@compile*/ {
+  fs := @compile::open("fast.toml"); //DocumentType
+  add := toml(ffi).select("dependency"); //str[]
+  ac := toml(fs.get_content()).insert("dependencies", add); //DocumentType
+  @compile::write("fast.toml", ac); //void
+}
+@compile::get_toml("fast.toml");
+fn insert(s : str, t : str) -> str {
+    return s + t;
+}
+fn add using insert;
+add("hello", "world"); // insert("hello", "world");
+// compile eval and extract takes str or expr 
+// we will add a compile eval method 
+// add extract method
+macro _i_`[inner : str]`-> {
+    return in {
+        @compile::extract(inner); // also if the type is expr you can return it without any problem
+    }
+}
+// for making a str block you must do this
+`[]` || [``] /*or*/ #{}
+// we will not use ""
+// to use it do this
+[inner : str]
+// how the set i work in enum
+enum X :int32 {
+    set i = 10;
+    A,
+    B,
+    C,
+}
+// that will run in compile time
+// and make it like this
+enum X :int32 {
+    [0] = A,
+    [10] = B,
+    [20] = C,
+}
+// if you have any preset values it will leave it as it is , but it will start again from it after it
+enum X :int32 {
+    set i = 10;
+    [10] = A,
+     B,
+     C,
+    [55] = D,
+    E,
+    F,
+}
+// ->
+enum X :int32 {
+    [0] = A,
+    [10] = B,
+    [20] = C,
+    [55] = D,
+    [65] = E,
+    [75] = F,
+}
+// to make sure it continue from where it stopped
+enum X :int32 {
+    set i = 10;
+    [10] = A,
+     B,
+     C,
+    [55] = D,
+    continue;
+    E,
+    F,
+}
+// ->
+enum X :int32 {
+    [0] = A,
+    [10] = B,
+    [20] = C,
+    [55] = D,
+    [30] = E,
+    [40] = F,
+}
+// also we will allow to set a increment after a stop "[]"
+enum X :int32 {
+    set i = 10;
+    A,
+    B,
+    C,
+    [55] = D, // stop
+    set i = 5;
+    E,
+    F,
+}
+// -> 
+enum X :int32 {
+    [0] = A,
+    [10] = B,
+    [20] = C,
+    [55] = D,
+    [60] = E,
+    [65] = F,
+}
+// also may allow the unneeded "[]"
+enum X :int32 {
+    set i = 10;
+    A,
+    B,
+    C,
+    D,
+    set i = 5;
+    () = E, // () means the default value
+    F,
+}
+// ->
+enum X :int32 {
+    [0] = A,
+    [10] = B,
+    [20] = C,
+    [30] = D,
+    [35] = E,
+    [40] = F,
+}
+impl static for X {
+    ...
+}
+impl X {
+    static {
+  ...
+    }
+    static fn ...
+}
+@compile :: macro 
+X :: {};
+X :: fn x()->{};
+X::x();
+@compile :: macro _deb_@dependency #{ffi : str} -> {
+    @compile::print("Macro dependency invoked: ", ffi);
+}
+id := ident {
+    name = "id_test";
+    type = int32;
+    value = 10;
+    constant = true;
+};
+id2 := ident::new(id);
+id3 := @compile::ident(id);
+blueprint DocumentPayload = {
+    char content[];
+    //char ext[] = "txt";
+    Time created;
+    Time updated;
+}
+enum Document : str {
+    ["html"] = Html(DocumentPayload),
+    ["json"] = Json(DocumentPayload),
+    ("raw") = Raw(DocumentPayload), *// for make the default value
+}
+
+impl Document::Html {
+    fn render() -> HtmlElement {
+        return html(this.content);
+    }
+}
+macro _ffi_scope_ &[@][name : str]#{inner : extern}->{
+    println("macro ffi_scope name : ",name);
+    return in {
+    Document[name](DocumentPayload {
+        name = "." + name,
+        content = inner,
+        created = Time::now(),
+        updated = Time::now(),
+    }); };
+}
+@compile :: macro _ffi_scope_ &[@][name : str]#{inner : extern}->{
+    @compile::print("macro ffi_scope name : ",name);
+    in {
+        println("macro ffi_scope name : ",name);
+    };
+    return in {
+    Document[name](DocumentPayload {
+        name = "." + name,
+        content = inner,
+        created = Time::now(),
+        updated = Time::now(),
+    }); };
+}
+@compile :: macro _ffi_scope_ &[@][name : str]#{inner : extern}->{
+    match name {
+        "dependency" => {
+            @compile::insert_dependency(inner);
+        }
+        _ => {
+            @compile::print("macro ffi_scope name : ",name);
+            in {
+                println("macro ffi_scope name : ",name);
+            };
+            return in {
+            Document[name](DocumentPayload {
+                name = "." + name,
+                content = inner,
+                created = Time::now(),
+                updated = Time::now(),
+            }); };
+        }
+    }
+}
+// we must add two type of string dec
+// i mean @ , $ , #
+// we will allow the string start with @ , $ , # to have a easy way to use it
+// $ : it will not be involved because the only purpose of it it to use a keyword as a name  for a method from an object
+// so after we allow using keywords in the declaration of a macro using & we don't need $ anymore
+// or do we ?
+macro $throw[e:Error] -> {
+    throw e;
+}
+// we will allow $ to be used only in the name of a macro
+// # : we have #{} string block (mean by that you can use spaces in it)
+// but also we will add #<string> to be able to used as a one string param
+// the same with @
+// now
+macro _lang_@[ffi : str]`[inner : extern]` -> {}; //@[] (that is better from &[@][ffi : str] and add more sense)
+// so &[@][ffi :str] mean that there is a expection for @ operator then a param ffi with a type str
+// that mean you can call it like this
+@html  /*or*/ @ html // with is bad syntax but it will work
+//so the new @[] will be only like this
+@html // and it will mean that there is a expection for a label name
+// for  {} , [] , <> , () , none , any
+// {} :  str , object , block
+// [] :  str , object , block
+// <> :  str , object , block
+// () :  str , object , block
+// none : str , 
+// any : str
+// any : str , object , block
+// ,
+[^[]^] // for any {([])} only (^)
+*[]* // for any type
+// for selecting a set of block
+macro _s_[{^[inner : str]^}] -> { // that will accept (inner) , [inner] ,<inner> and will not accept inner and {inner}
+    return in {
+        inner;
+    }
+}
+// we may to make it easier by  allowing to set the not allowed block first
+macro _s_[[{} , []] ^ [inner : str]] -> { // this is the same as above
+    return in {
+        inner;
+    }
+}
+// we will choose one of them
+// for selecting all
+macro _s_*[inner : str] -> { // that mean that we will accept all of them
+    return in {
+        inner;
+    }
+}
+// as you know [] means none so when we saying [[{},[]] ^ [inner : str]] we mean
+// so the outer [] is nessesary for the syntax
+// the second [] is an array of the Delimiters that we will not allow
+// the ^ means that we will not allow the this set of Delimiters
+// and  [inner : str] that for the definition of the inner params
+
+
+// overriding a macro
+// macro can be overrided and can override an existing fn or macro
+// ex :
+fn i_print() -> void {};
+macro i_print (v : int) ->  {};
+// in this specific case the we will override the fn i_print
+macro i_print (v : int)(v2 : int) ->  {}; // that will not override the fn i_print
+i_print(10)(20); // that how we will call this macro 
+// so there no need to use override any thing
+macro i_print (v : int , v2 : int) ->  {}; // that will override the fn i_print
+i_print(10 ,20); // that how we will call this macro
+macro i_print (v : int )( v2 : float64) ->  {}; // that will override the macro i_print
+i_print(10)(20.0); // that how we will call this macro 
+// we may marge the blueprint into the normal struct
+// so the difference between them now is very weak 
+// the only thing the struct cannot have is share 
+// we may add share to struct and the other blueprint's features
+// we may add also union as we will use c99 as the mean backend for now at least
+// add union are very useful in some cases 
+// yes you can use enum as union in rust and fastlang
+struct expected {
+    int32 code;
+    char[] msg;
+}
+enum uni : str {
+   ["code"] = Code(int32),
+   ["msg"] = Msg(char[]),
+   ["error"] = Error(expected),
+}
+union uni {
+    int32 code;
+    char[] msg;
+    expected error;
+}
+// i feel we will not need union in the future
+
+bool _i_have_fun_ = true;
+
+// pattern print
+fn pattern(ptt : str , ti : int32) -> void {
+    for x in range(0, ti) {
+        print(ptt); 
+    }
+}
+pattern("hello", 5); // hellohellohellohellohello
+
+// we have a problem when we have a extern struct decl it may cuase some problems
+// when we have a struct with the same name
+// to explan further :
+/*
+// fast_window test using raylib 5.0 (C ABI)
+import @c "raylib.h";
+import std::fmt;
+struct Rectangle {
+         int x;
+         int y;
+         int width;
+         int height;
+}
+extern @c  "raylib.h" ::  {
+    struct Color {
+         int r;
+         int g;
+         int b;
+         int a;
+    }
+    fn DrawRectangleRec(rec: Rectangle, color: Color);
+}
+*/
+/*
+PS C:\Users\DELL\projects\fast_window> C:\Users\DELL\projects\fast_lang\target\debug\fast_lang.exe run 
+Compiling C:\Users\DELL\projects\fast_window\src/main.fast...
+Including external library <raylib.h> (ABI: @C)...
+C:\Users\DELL\projects\fast_window\build\fast_window.cpp:16:8: error: redefinition of 'struct Rectangle'
+   16 | struct Rectangle {
+      |        ^~~~~~~~~
+In file included from C:\Users\DELL\projects\fast_window\build\fast_window.cpp:4:
+C:\Users\DELL\projects\fast_window\packages\raylib/raylib.h:244:16: note: previous definition of 'struct Rectangle'
+  244 | typedef struct Rectangle {
+      |                ^~~~~~~~~
+C++ compilation failed! Check C:\Users\DELL\projects\fast_window\build\fast_window.cpp for errors.
+*/
+// so this is the problem
+// when we try to use an existing struct as a param for an extern fn we will get an error
+// because the compiler will make a new struct with the same name
+// so we need to make the compiler to use the existing struct in the extern lib
+// and also we will allow impl on extern struct or struct used in extern fn
+// we also will add a way to make a similar structs
+// i mean if we have a two or more struct with the same fields
+// we will add a way to make a similar struct (with the same type)
+// maybe that will be in the declaration of the struct
+// ex :
+struct Rectangle {
+         int x;
+         int y;
+         int width;
+         int height;
+} as @c"raylib.h"::Rectangle; // in this way we will make the compiler to use the raylib.h::Rectangle
+//! also this problem it more about how we translate modules 
+// @c"raylib.h" , is not existing syntax but we will add it
+// we may remove the need of :
+import @c "raylib.h";
+// so now you can declare whare the extern from
+extern @c "raylib.h" ::  {}
+// so there is no need to import it
+// but if you import it
+// you will can use @c"raylib.h"::
+// but we may allow to use @c"raylib.h"::
+// without the need to import it or declare it in the extern block
+// but you will need to use the new syntax struct Rectangle {...} as @c"raylib.h"::Rectangle;
+// for fn we will allow to use the new syntax , but maybe hard
+
+
+
+macro _x_ @[ffi:str]&[::][[
+    scope : expr
+]] -> {
+    println("macro ffi_scope name : ",ffi);
+    return in {
+        scope;
+    }
+    println("macro ffi_scope name : ",ffi);
+}
+x := @html [10];
+// ->
+{
+    println("macro ffi_scope name : ","html");
+}();
+x := 10;
+{
+    println("macro ffi_scope name : ","html");
+}();
+macro _x_ @[ffi:str]&[::][[
+    scope : expr
+]] -> {
+
+    in {
+    println("macro ffi_scope name : ",ffi);
+    }
+    return in {
+        scope;
+    }
+    in {
+    println("macro ffi_scope name : ",ffi);
+    }
+}
+x := @html [10];
+// ->
+
+println("macro ffi_scope name : ","html");
+x := 10;
+println("macro ffi_scope name : ","html");
+// any opretion happen outside the in inject block must be at compile time
+macro _x_ @[ffi:str]&[::][[
+    scope : expr
+]] -> {
+    ffi = "." + ffi;
+    in {
+    println("macro ffi_scope name : ",ffi);
+    }
+    return in {
+        scope;
+    }
+    in {
+    println("macro ffi_scope name : ",ffi);
+    }
+}
+x := @html [10];
+// ->
+
+println("macro ffi_scope name : ",".html");
+x := 10;
+println("macro ffi_scope name : ",".html");
+macro _x_ @[ffi:str]&[::][[
+    scope : int32
+]] -> {
+    ffi = "." + ffi;
+    println("macro ffi_scope name : ",ffi);
+    return scope;
+}
+x := @html [10];
+// ->
+fn x_macro(ffi : str , scope : int32) -> {
+    ffi = "." + ffi;
+    println("macro ffi_scope name : ",ffi);
+    return scope;
+}
+x := x_macro("html",10);
+
+@compile :: macro _x_ @[ffi:str]&[::][[
+    scope : int32
+]] -> {
+    ffi = "." + ffi;
+    @compile::print("macro ffi_scope name : ",ffi);
+    return scope;
+}
+x := @html [10];
+// ->
+x := 10; // "macro ffi_scope name : .html" at compile time
+
+@compile :: macro _x_ @[ffi:str]&[::][[
+    scope : expr
+]] -> {
+    ffi = "." + ffi;
+    @compile::print("macro ffi_scope name : ",ffi);
+    return in {
+        scope;
+    };
+}
+x := @html [10];
+// ->
+x := 10; // "macro ffi_scope name : .html" at compile time
+
+@compile :: macro _x_ @[ffi:str]&[::][[
+    scope : expr
+]] -> {
+    ffi = "." + ffi;
+    in {
+    @compile::print("macro ffi_scope name : ",ffi);
+    }
+    return in {
+        scope;
+    };
+}
+
+arr[] := [...(1..10)];
+arr[] := [...1..10];
+arr[] := [...(1..10,2)];
+arr[] := [...1..10,2];
+arr[] := 0..10;
+arr[] := 0..10,2;
+// we will add a new compile access overload
+// that will take ident as a param
+@compile :: {
+set access<T>(T, ident) -> unknown*;
+}
+Blueprint X {
+    int32 x;
+    int32 y;
+}
+w := X {
+    x = 10;
+    y = 20;
+};
+c := @compile::access(w, x); 

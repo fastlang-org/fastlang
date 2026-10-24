@@ -95,11 +95,96 @@ fn test_pattern_alternation() -> void {
     }
 }
 
+enum X : uint8 {
+    [0] = A,
+    [31] = B {
+        int32 x;
+        int32 y;
+    },
+    [99] = C(int32),
+}
+
+fn test_indexed_enums() -> void {
+    println("X[0]: ", X[0]); // EXPECT: X[0]: A
+}
+
+// Case 1: set i = 10
+enum SimpleSeq : int32 {
+    set i = 10;
+    A,
+    B,
+    C,
+}
+
+// Case 2: manual jump and continue;
+enum ContinueSeq : int32 {
+    set i = 10;
+    A,
+    B,
+    C,
+    [55] = D,
+    continue;
+    E,
+    F,
+}
+
+// Case 3: manual jump and change step
+enum ChangeStepSeq : int32 {
+    set i = 10;
+    A,
+    B,
+    C,
+    [55] = D,
+    set i = 5;
+    E,
+    F,
+}
+
+// Case 4: change step without manual jump
+enum MidChangeSeq : int64 {
+    set iota = 10;
+    A,
+    B,
+    C,
+    D,
+    set i = 5;
+    E,
+    F,
+}
+
+fn test_enum_step_and_continue() -> void {
+    // Case 1: set i = 10 -> 0, 10, 20
+    int32 s_a = SimpleSeq::A as int32;
+    int32 s_b = SimpleSeq::B as int32;
+    int32 s_c = SimpleSeq::C as int32;
+    println("SimpleSeq: ", s_a, " ", s_b, " ", s_c); // EXPECT: SimpleSeq: 0 10 20
+
+    // Case 2: continue restores pre-jump counter -> 0, 10, 20, 55, 30, 40
+    int32 c_d = ContinueSeq::D as int32;
+    int32 c_e = ContinueSeq::E as int32;
+    int32 c_f = ContinueSeq::F as int32;
+    println("ContinueSeq: ", c_d, " ", c_e, " ", c_f); // EXPECT: ContinueSeq: 55 30 40
+
+    // Case 3: change step after manual jump -> 55, 60, 65
+    int32 ch_d = ChangeStepSeq::D as int32;
+    int32 ch_e = ChangeStepSeq::E as int32;
+    int32 ch_f = ChangeStepSeq::F as int32;
+    println("ChangeStepSeq: ", ch_d, " ", ch_e, " ", ch_f); // EXPECT: ChangeStepSeq: 55 60 65
+
+    // Case 4: mid change step without jump -> 30, 35, 40
+    int64 m_d = MidChangeSeq::D as int64;
+    int64 m_e = MidChangeSeq::E as int64;
+    int64 m_f = MidChangeSeq::F as int64;
+    println("MidChangeSeq: ", m_d, " ", m_e, " ", m_f); // EXPECT: MidChangeSeq: 30 35 40
+}
+
 fn main() -> int32 {
     test_number_match();
     test_using_and_tuple_payload();
     test_struct_payload_enum();
     test_pattern_alternation();
+    test_indexed_enums();
+    test_enum_step_and_continue();
 
     println("ALL 07_ENUMS TESTS PASSED"); // EXPECT: ALL 07_ENUMS TESTS PASSED
     return 0;

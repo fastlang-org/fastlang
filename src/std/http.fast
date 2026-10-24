@@ -2,6 +2,7 @@
 import std::net;
 import std::thread;
 import std::types;
+import std::document;
 import std::error;
 import std::fmt;
 
@@ -272,13 +273,13 @@ public class HttpResponse -> {
             this.send(doc.as_str(), "application/json");
         }
 
-        fn send_doc(doc: DocumentType) -> void {
+        fn send_doc(doc: Document) -> void {
             str ct = "text/plain";
-            str ext = doc.extension();
-            if (ext == "html") {
-                ct = "text/html; charset=utf-8";
-            } else if (ext == "json") {
-                ct = "application/json";
+            match doc {
+                Html(p) => { ct = "text/html; charset=utf-8"; }
+                Json(p) => { ct = "application/json"; }
+                Toml(p) => { ct = "application/toml"; }
+                Raw(p)  => { ct = "text/plain"; }
             }
             this.send(doc.as_str(), ct);
         }

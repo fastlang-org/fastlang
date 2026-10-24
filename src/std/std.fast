@@ -1,31 +1,38 @@
-// FastLang Standard Library: Core Prelude, Option & Base Types
+// FastLang Standard Library: Core Prelude, types and error included
 import std::types;
 import std::error;
 using types;
 
 
-public micro stop = ()-> {
-    break;
-}
 
 public @compile :: {
 
     set typeof<T>(T) -> type;
     set sizeof<T>(T) -> uint32;
-    set access<T>(T, MemberType) -> unknown*;
     set rand<T>() -> T;
     set rand<T>(T) -> T;
     set rand<T>(T, T) -> T;
     set rand<T>(T, T, T) -> T;
     set print<...T>(...T) -> void;
+    set input() -> str;
+    set open(str) -> auto;
+    set write(str, auto) -> void;
+    set write(auto) -> void;
+    set eval(str) -> void;
+    set extract(str) -> expr;
+    set ident(expr) -> ident;
+    set create_ident(str) -> ident;
+    set toml(str) -> auto;
+    // set time() -> auto;
+    set insert_dependency(str) -> void;
     set backend() -> Backend;
+    set runtime() -> bool;
     set system() -> System;
     impl type<T> -> {
         set printable() -> bool;
         set as_str() -> str; 
         set pointer() -> bool;
         set array() -> bool;
-       // set is_const() -> bool;
         set constant() -> bool;
         set undefined() -> bool;
         set runtime() -> bool;
@@ -43,6 +50,7 @@ public @compile :: {
         set throwable() -> bool;
         set shareable() -> bool;
         set copyable() -> bool;
+        set defaultable() -> bool;
         set default() -> T;
         set castable() -> bool;
         set castable_to(type) -> bool;
@@ -57,7 +65,7 @@ public @compile :: {
     set has_leave() -> bool;
     }
     */
-    micro todo = (msg: str) -> {
+    macro todo *[msg: str] -> void {
         throw new Error("TODO: " + msg);
     }
     method cast<Target, Source>(val: Source) -> Target {
@@ -83,7 +91,7 @@ public @compile :: {
 
 }
 // @compile wrapper
-public micro todo = (msg: str) -> void {
+public macro todo *[msg: str] -> void {
     @compile::todo(msg);
 }
 

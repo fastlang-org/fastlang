@@ -1,6 +1,6 @@
 [package]
 name = "fast_lang"
-version = "0.1.6-beta"
+version = "0.1.6-alpha"
 edition = "2021"
 
 [dependencies]

@@ -37,6 +37,8 @@ pub struct ProjectLoader {
     pub global_libs: Vec<PathBuf>,
     pub manifest: Option<FastManifest>,
     pub verbose: bool,
+    pub macro_patterns: Vec<Decl>,
+    pub loaded_macro_paths: HashSet<PathBuf>,
 }
 
 pub fn get_std_dirs() -> Vec<PathBuf> {
@@ -100,6 +102,8 @@ impl ProjectLoader {
             global_libs,
             manifest: None,
             verbose: false,
+            macro_patterns: Vec::new(),
+            loaded_macro_paths: HashSet::new(),
         }
     }
 
@@ -513,6 +517,90 @@ impl ProjectLoader {
         Ok(())
     }
 
+    pub fn preload_macros_from_file(&mut self, path: &str) {
+        let p = Path::new(path);
+        let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        if self.loaded_macro_paths.contains(&canonical) {
+            return;
+        }
+        self.loaded_macro_paths.insert(canonical);
+
+        let Ok(contents) = std::fs::read_to_string(path) else {
+            return;
+        };
+
+        let mut scanner = Scanner::new(contents);
+        let mut tokens = Vec::new();
+        let mut has_macro = false;
+        let mut has_import = false;
+
+        loop {
+            let tok = scanner.next_token();
+            let is_eof = tok.kind == TokenKind::EOF;
+            if tok.kind == TokenKind::TypeMacro {
+                has_macro = true;
+            }
+            if tok.kind == TokenKind::Import {
+                has_import = true;
+            }
+            match tok.kind {
+                TokenKind::InlineComment | TokenKind::MultiLineComment => {}
+                _ => tokens.push(tok),
+            }
+            if is_eof {
+                break;
+            }
+        }
+
+        if has_import {
+            for i in 0..tokens.len() {
+                if tokens[i].kind == TokenKind::Import {
+                    let mut parts = Vec::new();
+                    let mut j = i + 1;
+                    while j < tokens.len() {
+                        match &tokens[j].kind {
+                            TokenKind::Identifier(name) | TokenKind::LabelName(name) => {
+                                parts.push(name.clone());
+                            }
+                            TokenKind::DoubleColon | TokenKind::Divide => {}
+                            _ => break,
+                        }
+                        j += 1;
+                    }
+                    if !parts.is_empty() {
+                        let mod_name = parts.join("/");
+                        if let Some(mod_path) = self.resolve_path(&mod_name) {
+                            self.preload_macros_from_file(&mod_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        if has_macro {
+            let mut parser = Parser::new(tokens).with_macro_patterns(self.macro_patterns.clone());
+            if let Ok(prog) = parser.parse_program() {
+                for s in prog.statements {
+                    match s {
+                        Stmt::Declaration(Decl::MacroDecl { .. }) => {
+                            if let Stmt::Declaration(d) = s {
+                                self.macro_patterns.push(d);
+                            }
+                        }
+                        Stmt::Declaration(Decl::NamespaceDecl { decls, .. }) => {
+                            for d in decls {
+                                if matches!(d, Decl::MacroDecl { .. }) {
+                                    self.macro_patterns.push(d);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     fn parse_file(&mut self, path: &str) -> Result<(Vec<Stmt>, HashMap<String, TypeMetadata>), String> {
         let contents = std::fs::read_to_string(path)
             .map_err(|_| format!("Could not read '{}'. Make sure the file exists.", path))?;
@@ -539,12 +627,51 @@ impl ProjectLoader {
                 break;
             }
         }
+
+        // Preload macros from imported modules
+        for i in 0..tokens.len() {
+            if tokens[i].kind == TokenKind::Import {
+                let mut parts = Vec::new();
+                let mut j = i + 1;
+                while j < tokens.len() {
+                    match &tokens[j].kind {
+                        TokenKind::Identifier(name) | TokenKind::LabelName(name) => {
+                            parts.push(name.clone());
+                        }
+                        TokenKind::DoubleColon | TokenKind::Divide => {}
+                        _ => break,
+                    }
+                    j += 1;
+                }
+                if !parts.is_empty() {
+                    let mod_name = parts.join("/");
+                    if let Some(mod_path) = self.resolve_path(&mod_name) {
+                        self.preload_macros_from_file(&mod_path);
+                    }
+                }
+            }
+        }
     
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens).with_macro_patterns(self.macro_patterns.clone());
         let prog = parser.parse_program();
 
         match prog {
             Ok(program) => {
+                for s in &program.statements {
+                    match s {
+                        Stmt::Declaration(d @ Decl::MacroDecl { .. }) => {
+                            self.macro_patterns.push(d.clone());
+                        }
+                        Stmt::Declaration(Decl::NamespaceDecl { decls, .. }) => {
+                            for d in decls {
+                                if matches!(d, Decl::MacroDecl { .. }) {
+                                    self.macro_patterns.push(d.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 let mut metadata = parser.metadata.clone();
                 let set_ns_opt = program.statements.iter().find_map(|s| {
                     if let Stmt::SetNamespace(ns) = s {
@@ -590,8 +717,7 @@ impl ProjectLoader {
                                     | Decl::StructDecl { ref mut visibility, .. }
                                     | Decl::EnumDecl { ref mut visibility, .. }
                                     | Decl::MachineDecl { ref mut visibility, .. }
-                                    | Decl::MacroDecl { ref mut visibility, .. }
-                                    | Decl::MicroDecl { ref mut visibility, .. } => {
+                                    | Decl::MacroDecl { ref mut visibility, .. } => {
                                         *visibility = Visibility::Public;
                                     }
                                     _ => {}
@@ -643,6 +769,10 @@ impl ProjectLoader {
 
         if !Path::new(&entry_path).exists() {
             return Err(format!("Entry file '{}' not found.", entry_path));
+        }
+
+        if let Some(std_file) = self.resolve_path("std") {
+            self.preload_macros_from_file(&std_file);
         }
 
         println!("Compiling {}...", entry_path);

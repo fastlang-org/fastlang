@@ -28,16 +28,28 @@
 // EXPECT: Server received request: GET /api/info
 // EXPECT: Client successfully received HTTP response
 // EXPECT: HTTP Server test passed successfully
+// EXPECT: --- Testing DOM Native HtmlDocument Creation ---
+// EXPECT: Title Rendered: <h1>FastLang Web Engine</h1>
+// EXPECT: --- Testing Nested Components via @html & @f ---
+// EXPECT: Card Rendered: <div class="card"><h2>Server Side Component</h2><p>Running high performance FastLang SSR.</p></div>
+// EXPECT: --- Testing Button and Reactive FastReact Directives ---
+// EXPECT: Button Rendered: <button class="btn btn-primary" onclick="/api/like">Like Post</button>
+// EXPECT: --- Testing Form Input Tag ---
+// EXPECT: Input Rendered: <input type="email" name="user_email" placeholder="you@domain.com" />
 // EXPECT: ALL 24_WEB_AND_FASTREACT TESTS PASSED
 import std::fmt;
 import std::types;
+import std::document;
 import std::io;
 import std::net;
 import std::http;
 import std::thread;
+import std::html;
 
 using http;
 using thread;
+using html;
+using document;
 
 fn contains_str(haystack: str, needle: str) -> bool {
     if (needle.len == 0) {
@@ -112,8 +124,10 @@ fn test_casts_and_numberfy() -> void {
 
 fn test_documents_and_foreign_scopes() -> void {
     println("--- Testing Document, HtmlDocument, JsonDocument, and Foreign Scopes ---");
-    Document doc = new Document();
-    doc.set_content("Standard Doc content");
+    DocumentPayload p;
+    p.name = "test.txt";
+    p.content = "Standard Doc content";
+    Document doc = Document::Raw(p);
     println("Doc: " + doc.as_str());
 
     str safe_str = @safe {
@@ -339,6 +353,25 @@ fn test_http_server_and_client() -> void {
     println("HTTP Server test passed successfully");
 }
 
+fn test_dom_library() -> void {
+    println("--- Testing DOM Native HtmlDocument Creation ---");
+    HtmlDocument title = h1("FastLang Web Engine");
+    println("Title Rendered: " + title.render());
+
+    println("--- Testing Nested Components via @html & @f ---");
+    HtmlDocument body = p("Running high performance FastLang SSR.");
+    HtmlDocument user_card = card("Server Side Component", body);
+    println("Card Rendered: " + user_card.render());
+
+    println("--- Testing Button and Reactive FastReact Directives ---");
+    HtmlDocument btn = button("Like Post", "/api/like", "btn btn-primary");
+    println("Button Rendered: " + btn.render());
+
+    println("--- Testing Form Input Tag ---");
+    HtmlDocument email_input = input_tag("email", "user_email", "you@domain.com");
+    println("Input Rendered: " + email_input.render());
+}
+
 fn main() -> int32 {
     test_casts_and_numberfy();
     test_documents_and_foreign_scopes();
@@ -347,6 +380,7 @@ fn main() -> int32 {
     test_web_action();
     test_threads_and_mutex();
     test_http_server_and_client();
+    test_dom_library();
     println("ALL 24_WEB_AND_FASTREACT TESTS PASSED");
     return 0;
 }

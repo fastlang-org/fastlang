@@ -89,52 +89,12 @@ impl SemanticAnalyzer {
                                 .borrow_mut()
                                 .define_or_update(f_name, fn_info);
                         }
-                        Decl::MicroDecl {
-                            name: micro_name,
-                            params,
-                            body,
-                            visibility,
-                            generics,
-                            ..
-                        } => {
-                            let m_name = format!("{}::{}", name, micro_name);
-                            let short_name = micro_name.as_str();
-                            let mut aliases = vec![
-                                m_name.clone(),
-                                format!("{}::{}", name, short_name),
-                                short_name.to_string(),
-                            ];
-                            aliases.sort();
-                            aliases.dedup();
-                            let gen_types: Vec<BaseType> = generics
-                                .as_ref()
-                                .map(|v| v.iter().map(|s| BaseType::from_str(s)).collect())
-                                .unwrap_or_default();
-                            for alias in aliases {
-                                let alias_info = SymbolInfo {
-                                    name: alias.clone(),
-                                    kind: SymbolKind::Micro {
-                                        params: params.clone(),
-                                        generics: gen_types.clone(),
-                                        body: body.clone(),
-                                    },
-                                    visibility: visibility.clone(),
-                                    dependencies: vec![],
-                                    is_used: false,
-                                    is_param: false,
-                                    is_uninitialized: false,
-                                    is_compilable: true,
-                                };
-                                self.current_env
-                                    .borrow_mut()
-                                    .define_or_update(alias, alias_info);
-                            }
-                        }
                         Decl::ImplDecl {
                             target,
                             target_generics,
                             methods,
                             handle_block,
+                            static_block,
                             ..
                         } => {
                         let spec_key = if target_generics.is_empty()
@@ -164,7 +124,7 @@ impl SemanticAnalyzer {
                         if !target_generics.is_empty() {
                             entry.ty = BaseType::from_impl_target(target, target_generics);
                         }
-                        for m in methods {
+                        for m in methods.iter().chain(static_block.iter()) {
                             if let Decl::FnDecl {
                                 name,
                                 generics,
@@ -222,11 +182,22 @@ impl SemanticAnalyzer {
                 visibility,
                 ..
             } => {
+                // Ghost macro names (_name_) must NOT be stripped of underscores
+                // or aliased to plain names -- doing so causes false conflicts with
+                // regular functions that happen to share the inner word (e.g.,
+                // `_range_` must never inject `"range"` into the symbol table).
+                // Only register the exact name and the `\$`-stripped variant.
                 let without_dollar = name.trim_start_matches('$');
-                let mut aliases = vec![name.clone(), without_dollar.to_string()];
-                aliases.sort();
+                let mut aliases = vec![name.clone()];
+                if without_dollar != name {
+                    aliases.push(without_dollar.to_string());
+                }
                 aliases.dedup();
                 for alias in aliases {
+                    self.macro_overloads
+                        .entry(alias.clone())
+                        .or_default()
+                        .push((params.clone(), BaseType::Void, body.clone()));
                     let alias_info = SymbolInfo {
                         name: alias.clone(),
                         kind: SymbolKind::Macro {
@@ -251,6 +222,7 @@ impl SemanticAnalyzer {
                 target_generics,
                 methods,
                 handle_block,
+                static_block,
                 ..
             } => {
                 let spec_key = if target_generics.is_empty()
@@ -281,7 +253,7 @@ impl SemanticAnalyzer {
                 if !target_generics.is_empty() {
                     entry.ty = BaseType::from_impl_target(target, target_generics);
                 }
-                for m in methods {
+                for m in methods.iter().chain(static_block.iter()) {
                     if let Decl::FnDecl {
                         name,
                         generics,
@@ -391,6 +363,35 @@ impl SemanticAnalyzer {
                     .borrow_mut()
                     .define_or_update(name.clone(), fn_info);
             }
+            Decl::FnAliasDecl { visibility, name, target } => {
+                self.fn_aliases.insert(name.clone(), target.clone());
+                if let Some(target_sigs) = self.fn_overloads.get(target).cloned() {
+                    let mut alias_sigs = Vec::new();
+                    for mut sig in target_sigs {
+                        sig.name = name.clone();
+                        alias_sigs.push(sig);
+                    }
+                    self.fn_overloads.insert(name.clone(), alias_sigs);
+                }
+                let fn_info = SymbolInfo {
+                    name: name.clone(),
+                    kind: SymbolKind::Function {
+                        params: vec![],
+                        return_type: BaseType::Unknown,
+                        generics: vec![],
+                        body: None,
+                    },
+                    visibility: visibility.clone(),
+                    dependencies: vec![target.clone()],
+                    is_used: false,
+                    is_param: false,
+                    is_uninitialized: false,
+                    is_compilable: true,
+                };
+                self.current_env
+                    .borrow_mut()
+                    .define_or_update(name.clone(), fn_info);
+            }
             Decl::BlueprintDecl {
                 visibility,
                 name,
@@ -463,6 +464,7 @@ impl SemanticAnalyzer {
             Decl::EnumDecl {
                 visibility,
                 name,
+                underlying_type,
                 variants,
                 generics,
                 ..
@@ -501,6 +503,7 @@ impl SemanticAnalyzer {
                         name: name.clone(),
                         ty: BaseType::Enum {
                             name: name.clone(),
+                            underlying_type: underlying_type.clone().map(Box::new),
                             variants: variants.clone(),
                             methods: Box::new(HashMap::new()),
                             generics: generics.clone(),

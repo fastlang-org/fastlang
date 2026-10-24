@@ -1,174 +1,175 @@
-<div align="center">
-  <h1>⚡ FastLang</h1>
-  <p>A statically typed, high-performance systems language with native reactive web primitives and zero-overhead compilation.</p>
+# FastLang
 
-  <a href="https://ko-fi.com/W5V0236W86" target="_blank">
-      <img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Support me on Ko-fi" height="36" style="border:0px;height:36px;" />
-  </a>
-</div>
+FastLang is a statically typed native programming language designed around explicit types, expressive scopes, compile-time programming, native interoperability, and practical systems development.
 
-<br />
+The repository contains the compiler, standard library, project tooling, and the language documentation. FastLang is experimental and its syntax is evolving toward a stable release.
 
-> [!NOTE]
-> FastLang is an open, experimental systems programming language developed from scratch in Rust, designed to explore compiler architectures, ergonomic type systems, and native reactive document runtimes.
+## About
 
----
+FastLang combines:
 
-## 🚀 Key Highlights
+- statically checked primitive, generic, object, enum, and collection types
+- explicit pointers, references, mutable references, and cleanup capabilities
+- functions, methods, overloads, generics, lambdas, and variadic calls
+- structured control flow, pattern matching, and state machines
+- pattern-based macros with explicit AST injection
+- compile-time reflection and validation through the @compile namespace
+- C-compatible foreign functions and native library linking
+- standard-library support for I/O, networking, documents, web applications, time, threads, and SQLite
 
-- **Modern Statically Typed Syntax**: Expressive type inference, first-class functions, pipelines, and explicit memory semantics (`ref<T>`, `mutRef<T>`).
-- **Blueprints & Object Orientation**: Data-first structs (`blueprint`), encapsulation, and decoupled method definitions (`impl`).
-- **Algebraic Data Types & Matching**: Exhaustive pattern matching on tagged enums, `Option<T>`, and `Result<T>`.
-- **First-Class Reactive Web & Foreign Scopes**: Native `@html`, `@json`, and `@safe` blocks with `@f{...}` interpolation, paired with FastReact declarative directives (`onclick`, `onsubmit`, `live`, `target`, `swap`).
-- **Comprehensive Standard Library**: Native support for threads, synchronization mutexes, network sockets, HTTP servers, collections (`list`, `HashSet`, `HashMap`), and embedded SQLite (`std::sql`).
-- **Zero-Config Project Tooling**: Built-in CLI workflow with `fast new`, `fast run`, `fast build`, and `fast test` managed via `Fast.toml`.
-- **High-Performance Backend**: Emits optimized C++20 code, compiled directly with native toolchains.
-
----
-
-## 🔍 Language Tour
-
-### 1. Functions & Control Flow
-```rust
-import std::fmt;
-
-fn fibonacci(n: int32) -> int32 {
-    if (n <= 1) {
-        return n;
-    }
-    return fibonacci(n - 1) + fibonacci(n - 2);
-}
-
-fn main() -> void {
-    int32 result = fibonacci(10);
-    fmt::println("Fibonacci(10) = " + result);
-}
-```
-
-### 2. Blueprints & Methods
-```rust
-import std::fmt;
-
-blueprint User -> {
-    int32 id;
-    str name;
-    bool active = true;
-}
-
-impl User -> {
-    fn display() -> void {
-        fmt::println("User #" + this.id + ": " + this.name);
-    }
-}
-
-fn main() -> void {
-    User u = new User(1, "Hakim");
-    u.display();
-}
-```
-
-### 3. Pattern Matching & Enums
-```rust
-import std::fmt;
-
-enum Status -> {
-    Pending,
-    Active(int32),
-    Completed(str)
-}
-
-fn handle_status(s: Status) -> void {
-    match (s) -> {
-        Pending => fmt::println("Waiting..."),
-        Active(id) => fmt::println("In progress with task: " + id),
-        Completed(msg) => fmt::println("Done: " + msg),
-        _ => fmt::println("Unknown state")
-    }
-}
-```
-
-### 4. Native Reactive Web & FastReact
-```rust
-import std::http;
-
-blueprint ItemCard -> {
-    str name = "Calculator";
-    int32 price = 350;
-}
-
-impl ItemCard -> {
-    fn render() -> HtmlDocument {
-        return @html {
-            <div id="card" class="item">
-                <h3>@f{this.name}</h3>
-                <p>Price: @f{this.price} EGP</p>
-                <button onclick="/buy" target="#card" swap="outerHTML">
-                    Purchase
-                </button>
-            </div>
-        };
-    }
-}
-```
-
-### 5. Embedded SQLite Database
-```rust
-import std::fmt;
-import std::sql;
-
-fn query_users() -> void {
-    db := sql::open("data.db");
-    db.exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT);");
-    db.exec("INSERT INTO users (name) VALUES ('Hakim');");
-
-    stmt := db.prepare("SELECT id, name FROM users;");
-    while (stmt.step()) -> {
-        int32 id = stmt.get_int(0);
-        str name = stmt.get_str(1);
-        fmt::println("User: " + id + " - " + name);
-    }
-    stmt.finalize();
-    db.close();
-}
-```
-
----
-
-## 🛠️ Quick Start
+## Get started
 
 ### Requirements
-- [Rust Toolchain](https://rustup.rs/) (edition 2021+)
-- Modern C++20 compiler (`g++` or `clang++`)
 
-### Installation & Build
-```bash
-# Clone the repository
-git clone https://github.com/Trezone/fast_lang.git
+Building the compiler from source currently requires:
+
+- Rust toolchain, edition 2021
+- a native compiler/toolchain for the selected backend
+- a C/C++ development environment for the current runtime path
+
+### Build the compiler
+
+```text
+git clone <repository-url>
 cd fast_lang
-
-# Build release binary
 cargo build --release
 ```
 
-### Project Workflow
-```bash
-# Create a new FastLang binary project
-fast new my_app -y
-cd my_app
+Place the resulting executable on PATH as fast, or invoke the compiler binary directly.
 
-# Run the project
+### Create and run a project
+
+```text
+fast new hello -y
+cd hello
 fast run
-
-# Run tests
-fast test
 ```
 
----
+A project normally contains:
 
-<div align="center">
-  <p>Crafted with passion for fast, expressive systems programming.</p>
+```text
+hello/
+├── Fast.toml
+└── src/
+    └── main.fast
+```
 
-  <a href="https://ko-fi.com/W5V0236W86" target="_blank">
-      <img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Support me on Ko-fi" height="36" style="border:0px;height:36px;" />
-  </a>
-</div>
+### Minimal program
+
+```fast
+import std::fmt;
+
+fn main() -> int32 {
+    println("Hello, FastLang!");
+    return 0;
+}
+```
+
+## Language tour
+
+### Functions and inference
+
+```fast
+fn identity<T>(value: T) -> T {
+    return value;
+}
+
+name := "FastLang";
+int32 answer = identity(42);
+```
+
+### Objects and implementations
+
+```fast
+struct Point {
+    int32 x;
+    int32 y;
+}
+
+impl Point -> {
+    fn label() -> str {
+        return "(" + this.x + ", " + this.y + ")";
+    }
+}
+```
+
+### Enums and matching
+
+```fast
+enum Status {
+    Pending,
+    Active(int32),
+    Done(str),
+}
+
+fn describe(status: Status) -> void {
+    match (status) -> {
+        Pending => println("waiting");
+        Active(id) => println("active: ", id);
+        Done(message) => println(message);
+        _ => println("unknown");
+    }
+}
+```
+
+### Compile-time programming
+
+```fast
+fn require_printable<T>(value: T) -> void {
+    @compile {
+        if (!typeof(value).printable()) {
+            @compile::throw new Error("value is not printable");
+        }
+    }(value);
+}
+```
+
+### Native interoperability
+
+```fast
+extern @c "raylib.h" :: {
+    fn InitWindow(width: int32, height: int32, title: str);
+}
+```
+
+## Project workflow
+
+```text
+fast new NAME       Create a project
+fast init           Initialize Fast.toml
+fast run            Compile and run
+fast build          Compile without running
+fast clean          Remove build artifacts
+fast --help         Show compiler and CLI options
+```
+
+Project configuration lives in `Fast.toml`. It defines package metadata, the entry point, backend selection, dependencies, scripts, and native link flags.
+
+## Documentation
+
+The complete, feature-by-feature language and compiler documentation is available in the [FastLang documentation index](docs/index.md).
+
+The documentation is organized into independent pages for:
+
+- [Syntax and declarations](docs/language/syntax.md)
+- [Types and values](docs/language/types.md)
+- [Functions and lambdas](docs/language/functions.md)
+- [Control flow and loops](docs/language/control-flow.md)
+- [Objects and data types](docs/language/objects.md)
+- [Enums and pattern matching](docs/language/enums.md)
+- [Macros](docs/language/macros.md)
+- [Compile-time programming](docs/language/compile-time.md)
+- [Memory and cleanup](docs/language/memory.md)
+- [Projects and Fast.toml](docs/projects.md)
+- [Compiler CLI](docs/compiler.md)
+- [Standard library](docs/stdlib.md)
+
+For the short overview, see [language-guide.md](docs/language-guide.md). Internal design notes are kept separately in [docs/internal/todo.fast](docs/internal/todo.fast) and are not language guarantees.
+
+## Backend direction
+
+The project is moving toward a native C99 backend as the primary backend for the next compiler phase. Backend implementation details are intentionally kept separate from the language reference so that the language documentation remains stable while the compiler backend evolves.
+
+## License
+
+FastLang is distributed under the license declared by the project.

@@ -458,6 +458,13 @@ impl Parser {
                                 TokenKind::Greater => {
                                     depth -= 1;
                                 }
+                                TokenKind::ShiftRight => {
+                                    if depth >= 2 {
+                                        depth -= 2;
+                                    } else {
+                                        depth -= 1;
+                                    }
+                                }
                                 _ => {}
                             }
                             i += 1;
@@ -562,8 +569,10 @@ impl Parser {
                     self.advance();
                     args.push(self.parse_expression()?);
                 }
-                if self.peek().kind == TokenKind::SemiColon {
+                if self.peek().kind == TokenKind::SemiColon || self.peek().kind == TokenKind::Comma {
                     self.advance();
+                } else if self.peek().kind != TokenKind::RBrace {
+                    return Err("Expected ';' after call statement".to_string());
                 }
                 return Ok(Stmt::CallStmt(Expr::Call {
                     callee: Box::new(expr),
@@ -578,6 +587,8 @@ impl Parser {
             let cond = self.parse_postfix_condition()?;
             if self.peek().kind == TokenKind::SemiColon || self.peek().kind == TokenKind::Comma {
                 self.advance();
+            } else if self.peek().kind != TokenKind::RBrace {
+                return Err("Expected ';' after postfix if".to_string());
             }
             return Ok(Stmt::IfStmt {
                 condition: cond,
@@ -587,6 +598,8 @@ impl Parser {
         }
         if self.peek().kind == TokenKind::SemiColon || self.peek().kind == TokenKind::Comma {
             self.advance();
+        } else if self.peek().kind != TokenKind::RBrace {
+            return Err("Expected ';' after statement".to_string());
         }
         Ok(base_stmt)
     }
@@ -664,6 +677,8 @@ impl Parser {
                 TokenKind::SemiColon,
                 "Expected ';' after expression statement",
             )?;
+        } else if self.peek().kind != TokenKind::RBrace && self.peek().kind != TokenKind::Comma {
+            return Err("Expected ';' after expression statement".to_string());
         }
         Ok(base_stmt)
     }

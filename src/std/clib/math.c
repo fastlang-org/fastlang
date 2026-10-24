@@ -20,3 +20,11 @@ double fast_cos(double x) {
 double fast_tan(double x) {
     return tan(x);
 }
+
+double fast_floor(double x) {
+    return floor(x);
+}
+
+double fast_ceil(double x) {
+    return ceil(x);
+}

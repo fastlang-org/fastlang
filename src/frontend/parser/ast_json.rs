@@ -247,16 +247,6 @@ pub fn decl_to_json(decl: &Decl) -> Value {
             "return_type": return_type.as_ref().map(|t| t.as_str()),
             "body": stmts_to_json(statements)
         }),
-        Decl::MicroDecl { visibility, name, params, return_type, body, generics } =>
-            json!({
-            "type": "MicroDecl",
-            "name": name,
-            "visibility": format!("{:?}", visibility),
-            "generics": generics,
-            "params": params.iter().map(|p| json!({ "name": p.name, "type": p.type_node.as_str() })).collect::<Vec<_>>(),
-            "return_type": return_type.as_ref().map(|t| t.as_str()),
-            "body": stmts_to_json(body)
-        }),
         Decl::LabelDecl { name, max_runs, body } =>
             json!({
             "type": "LabelDecl",

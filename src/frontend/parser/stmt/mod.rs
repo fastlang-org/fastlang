@@ -15,12 +15,8 @@ impl Parser {
                 self.advance();
                 return Ok(None);
             }
-            TokenKind::Import => {
-                self.parse_import_stmt().map(Stmt::Declaration)
-            }
-            TokenKind::Public => {
-                self.parse_exported_stmt().map(Stmt::Declaration)
-            }
+            TokenKind::Import => self.parse_import_stmt().map(Stmt::Declaration),
+            TokenKind::Public => self.parse_exported_stmt().map(Stmt::Declaration),
             TokenKind::Extern => self.parse_extern_decl().map(Stmt::Declaration),
             TokenKind::Define => self.parse_define_stmt(false).map(Stmt::Declaration),
             TokenKind::Const => {
@@ -34,7 +30,7 @@ impl Parser {
                     self.parse_const(scope).map(Stmt::Declaration)
                 }
             }
-            | TokenKind::TypeInt(_)
+            TokenKind::TypeInt(_)
             | TokenKind::TypeUInt(_)
             | TokenKind::TypeUSize
             | TokenKind::TypeISize
@@ -58,7 +54,7 @@ impl Parser {
                 }
                 self.parse_var_decl(scope).map(Stmt::Declaration)
             }
-            | TokenKind::TypeFn
+            TokenKind::TypeFn
             | TokenKind::TypeLambda
             | TokenKind::TypeNumber
             | TokenKind::TypeType
@@ -68,7 +64,10 @@ impl Parser {
                 if let Some(next) = self.tokens.get(self.current + 1) {
                     if next.kind == TokenKind::DoubleColon {
                         if let Some(sub) = self.tokens.get(self.current + 2) {
-                            if matches!(sub.kind, TokenKind::Fn | TokenKind::TypeFn | TokenKind::TypeMethod) {
+                            if matches!(
+                                sub.kind,
+                                TokenKind::Fn | TokenKind::TypeFn | TokenKind::TypeMethod
+                            ) {
                                 self.advance(); // consume 'function'
                                 self.advance(); // consume '::'
                                 return self.parse_fn_decl().map(Stmt::Declaration).map(Some);
@@ -92,13 +91,24 @@ impl Parser {
                         self.advance(); // consume 'object'
                         self.advance(); // consume '::'
                         match self.peek().kind {
-                            TokenKind::TypeStruct => return self.parse_struct_decl().map(Stmt::Declaration).map(Some),
-                            TokenKind::TypeClass => return self.parse_class_decl().map(Stmt::Declaration).map(Some),
-                            TokenKind::TypeBluePrint => return self.parse_blueprint_decl().map(Stmt::Declaration).map(Some),
-                            TokenKind::TypeEnum => return self.parse_enum_decl().map(Stmt::Declaration).map(Some),
+                            TokenKind::TypeStruct => {
+                                return self.parse_struct_decl().map(Stmt::Declaration).map(Some)
+                            }
+                            TokenKind::TypeClass => {
+                                return self.parse_class_decl().map(Stmt::Declaration).map(Some)
+                            }
+                            TokenKind::TypeBluePrint => {
+                                return self.parse_blueprint_decl().map(Stmt::Declaration).map(Some)
+                            }
+                            TokenKind::TypeEnum => {
+                                return self.parse_enum_decl().map(Stmt::Declaration).map(Some)
+                            }
                             TokenKind::Identifier(ref id) if id == "namespace" => {
                                 self.advance(); // consume 'namespace'
-                                return self.parse_namespace_decl().map(Stmt::Declaration).map(Some);
+                                return self
+                                    .parse_namespace_decl()
+                                    .map(Stmt::Declaration)
+                                    .map(Some);
                             }
                             _ => {}
                         }
@@ -106,12 +116,18 @@ impl Parser {
                         if let Some(after) = self.tokens.get(self.current + 2) {
                             if after.kind == TokenKind::DoubleColon {
                                 self.advance(); // consume 'object'
-                                return self.parse_namespace_decl().map(Stmt::Declaration).map(Some);
+                                return self
+                                    .parse_namespace_decl()
+                                    .map(Stmt::Declaration)
+                                    .map(Some);
                             } else if after.kind == TokenKind::Assign {
                                 if let Some(after_assign) = self.tokens.get(self.current + 3) {
                                     if after_assign.kind == TokenKind::LBrace {
                                         self.advance(); // consume 'object'
-                                        return self.parse_blueprint_decl().map(Stmt::Declaration).map(Some);
+                                        return self
+                                            .parse_blueprint_decl()
+                                            .map(Stmt::Declaration)
+                                            .map(Some);
                                     }
                                 }
                             } else if after.kind == TokenKind::LBrace {
@@ -127,7 +143,7 @@ impl Parser {
             TokenKind::Using => self.parse_using_stmt(),
             TokenKind::Set => self.parse_reassign_stmt(),
 
-            | TokenKind::TypeBluePrint
+            TokenKind::TypeBluePrint
             | TokenKind::Impl
             | TokenKind::Fn
             | TokenKind::Virtual
@@ -136,36 +152,36 @@ impl Parser {
             | TokenKind::TypeStruct
             | TokenKind::TypeEnum
             | TokenKind::TypeBlock
-            | TokenKind::TypeMicro
             | TokenKind::TypeMacro
             | TokenKind::TypeMachine
             | TokenKind::Del => {
-                if
-                    !matches!(
-                        scope,
-                        ScopeType::Global |
-                            ScopeType::Class |
-                            ScopeType::Struct |
-                            ScopeType::Blueprint |
-                            ScopeType::Handle |
-                            ScopeType::Label |
-                            ScopeType::Block |
-                            ScopeType::Fn |
-                            ScopeType::Impl
-                    )
-                {
-                    return Err(
-                        format!(
-                            "Syntax Error: {:?} declarations are not allowed in this scope",
-                            self.peek().kind
-                        )
-                    );
+                if !matches!(
+                    scope,
+                    ScopeType::Global
+                        | ScopeType::Class
+                        | ScopeType::Struct
+                        | ScopeType::Blueprint
+                        | ScopeType::Handle
+                        | ScopeType::Label
+                        | ScopeType::Block
+                        | ScopeType::Fn
+                        | ScopeType::Impl
+                ) {
+                    return Err(format!(
+                        "Syntax Error: {:?} declarations are not allowed in this scope",
+                        self.peek().kind
+                    ));
                 }
                 match self.peek().kind {
                     TokenKind::TypeBluePrint => self.parse_blueprint_decl().map(Stmt::Declaration),
                     TokenKind::Impl => self.parse_impl_decl().map(Stmt::Declaration),
                     TokenKind::Fn | TokenKind::Virtual | TokenKind::Abstract => {
-                        if self.peek().kind == TokenKind::Fn && self.peek_ahead(1).map(|t| t.kind == TokenKind::LParen).unwrap_or(false) {
+                        if self.peek().kind == TokenKind::Fn
+                            && self
+                                .peek_ahead(1)
+                                .map(|t| t.kind == TokenKind::LParen)
+                                .unwrap_or(false)
+                        {
                             self.parse_expression_stmt()
                         } else {
                             self.parse_fn_decl().map(Stmt::Declaration)
@@ -175,7 +191,6 @@ impl Parser {
                     TokenKind::TypeStruct => self.parse_struct_decl().map(Stmt::Declaration),
                     TokenKind::TypeEnum => self.parse_enum_decl().map(Stmt::Declaration),
                     TokenKind::TypeBlock => self.parse_block_scope_decl().map(Stmt::Declaration),
-                    TokenKind::TypeMicro => self.parse_micro_decl().map(Stmt::Declaration),
                     TokenKind::TypeMacro => self.parse_macro_decl().map(Stmt::Declaration),
                     TokenKind::TypeMachine => self.parse_machine_decl().map(Stmt::Declaration),
                     TokenKind::Del => self.parse_del_stmt(),
@@ -183,27 +198,26 @@ impl Parser {
                 }
             }
 
-            | TokenKind::If
+            TokenKind::If
             | TokenKind::For
             | TokenKind::Loop
             | TokenKind::While
             | TokenKind::Do
             | TokenKind::Match => {
-                if
-                    !matches!(
-                        scope,
-                        ScopeType::Global |
-                            ScopeType::Fn |
-                            ScopeType::Class |
-                            ScopeType::Blueprint |
-                            ScopeType::Block |
-                            ScopeType::Label |
-                            ScopeType::Handle
-                    )
-                {
-                    return Err(
-                        format!("Syntax Error: {:?} is not allowed in this scope", self.peek().kind)
-                    );
+                if !matches!(
+                    scope,
+                    ScopeType::Global
+                        | ScopeType::Fn
+                        | ScopeType::Class
+                        | ScopeType::Blueprint
+                        | ScopeType::Block
+                        | ScopeType::Label
+                        | ScopeType::Handle
+                ) {
+                    return Err(format!(
+                        "Syntax Error: {:?} is not allowed in this scope",
+                        self.peek().kind
+                    ));
                 }
                 match self.peek().kind {
                     TokenKind::If => self.parse_if_stmt(),
@@ -232,7 +246,7 @@ impl Parser {
                 Ok(Stmt::LeaveStmt)
             }
 
-            TokenKind::Yield => { self.parse_yield_stmt() }
+            TokenKind::Yield => self.parse_yield_stmt(),
             TokenKind::Break | TokenKind::Continue => {
                 let kind = self.peek().kind.clone();
                 self.advance();
@@ -253,13 +267,35 @@ impl Parser {
                 }
                 self.consume(
                     TokenKind::SemiColon,
-                    format!("Expected ';' after {:?}", kind).as_str()
+                    format!("Expected ';' after {:?}", kind).as_str(),
                 )?;
                 Ok(base_stmt)
             }
 
             TokenKind::Return => {
                 self.advance();
+                if self.peek().kind == TokenKind::In
+                    || matches!(&self.peek().kind, TokenKind::Identifier(id) if id == "in")
+                {
+                    self.advance(); // consume 'in'
+                    if self.peek().kind == TokenKind::LBrace {
+                        self.advance(); // consume '{'
+                        let mut block_stmts = Vec::new();
+                        while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
+                            if let Some(s) = self.parse_statement(ScopeType::Block)? {
+                                block_stmts.push(s);
+                            }
+                        }
+                        self.consume(TokenKind::RBrace, "Expected '}' after return in block")?;
+                        if self.peek().kind == TokenKind::SemiColon {
+                            self.advance();
+                        }
+                        return Ok(Some(Stmt::ReturnStmt(Some(Expr::BlockExpr {
+                            statements: block_stmts,
+                            final_expr: None,
+                        }))));
+                    }
+                }
                 let mut ret_val = None;
                 if self.peek().kind != TokenKind::SemiColon && self.peek().kind != TokenKind::If {
                     ret_val = Some(self.parse_expression()?);
@@ -276,6 +312,10 @@ impl Parser {
                 }
                 if self.peek().kind == TokenKind::SemiColon {
                     self.advance();
+                } else if self.peek().kind != TokenKind::RBrace
+                    && self.peek().kind != TokenKind::Comma
+                {
+                    return Err("Expected ';' after return statement".to_string());
                 }
                 Ok(Stmt::ReturnStmt(ret_val))
             }
@@ -283,22 +323,40 @@ impl Parser {
             TokenKind::Throw => self.parse_throw_stmt(),
             TokenKind::Try => self.parse_try_catch_stmt(),
 
-            TokenKind::LabelName(lbl)
-                if lbl.eq_ignore_ascii_case("@dependency") =>
-            {
+            TokenKind::LabelName(lbl) if lbl.eq_ignore_ascii_case("@dependency") => {
+                let _directive = lbl.clone();
                 self.advance(); // consume directive
+                let mut block_text = String::new();
+                if self.peek().kind == TokenKind::Hash {
+                    self.advance(); // consume '#'
+                }
                 if self.peek().kind == TokenKind::LBrace {
                     self.advance(); // consume '{'
                     let mut depth = 1;
                     while !self.is_at_end() && depth > 0 {
                         if self.peek().kind == TokenKind::LBrace {
                             depth += 1;
+                            block_text.push('{');
                         } else if self.peek().kind == TokenKind::RBrace {
                             depth -= 1;
                             if depth == 0 {
                                 self.advance(); // consume '}'
                                 break;
                             }
+                            block_text.push('}');
+                        } else {
+                            let temp_str;
+                            let tok_str = match &self.peek().kind {
+                                TokenKind::TemplateText(t) => t.as_str(),
+                                other => {
+                                    temp_str = other.as_str();
+                                    &temp_str
+                                }
+                            };
+                            if !block_text.is_empty() && !block_text.ends_with('\n') && !block_text.ends_with(' ') {
+                                block_text.push(' ');
+                            }
+                            block_text.push_str(tok_str);
                         }
                         self.advance();
                     }
@@ -306,12 +364,24 @@ impl Parser {
                 if self.peek().kind == TokenKind::SemiColon {
                     self.advance();
                 }
+                if self.macro_metadata.contains("@dependency")
+                    || self.macro_metadata.iter().any(|m| m.contains("dependency"))
+                {
+                    let macro_name = self.macro_metadata.iter()
+                        .find(|m| m.as_str() == "@dependency" || m.contains("dependency"))
+                        .cloned()
+                        .unwrap_or_else(|| "@dependency".to_string());
+                    return Ok(Some(Stmt::ExpressionStmt(Expr::Call {
+                        callee: Box::new(Expr::Identifier(macro_name)),
+                        args: vec![Expr::LiteralString(block_text.trim().to_string())],
+                        generics: vec![],
+                    })));
+                }
                 return Ok(None);
             }
 
             TokenKind::LabelName(lbl)
-                if lbl.eq_ignore_ascii_case("@compile")
-                    || lbl.eq_ignore_ascii_case("@sys") =>
+                if lbl.eq_ignore_ascii_case("@compile") || lbl.eq_ignore_ascii_case("@sys") =>
             {
                 if lbl.eq_ignore_ascii_case("@compile") && self.is_compile_validation_ahead() {
                     self.advance(); // consume '@compile'
@@ -403,37 +473,33 @@ impl Parser {
                 }
                 Ok(Stmt::ThisBlock(stmts))
             }
-            TokenKind::This => { self.parse_expression_or_reassignment() }
+            TokenKind::This => self.parse_expression_or_reassignment(),
 
             TokenKind::Super => {
-                if
-                    !matches!(
-                        scope,
-                        ScopeType::Class |
-                            ScopeType::Struct |
-                            ScopeType::Blueprint |
-                            ScopeType::Handle |
-                            ScopeType::Label
-                    )
-                {
+                if !matches!(
+                    scope,
+                    ScopeType::Class
+                        | ScopeType::Struct
+                        | ScopeType::Blueprint
+                        | ScopeType::Handle
+                        | ScopeType::Label
+                ) {
                     return Err("Syntax Error: 'super' is not allowed in this scope".to_string());
                 }
                 self.parse_expression_or_reassignment()
             }
 
             TokenKind::Goto => {
-                if
-                    !matches!(
-                        scope,
-                        ScopeType::Handle |
-                            ScopeType::Label |
-                            ScopeType::Fn |
-                            ScopeType::Blueprint |
-                            ScopeType::Block
-                    )
-                {
+                if !matches!(
+                    scope,
+                    ScopeType::Handle
+                        | ScopeType::Label
+                        | ScopeType::Fn
+                        | ScopeType::Blueprint
+                        | ScopeType::Block
+                ) {
                     return Err(
-                        "Syntax Error: Goto statements are not allowed in this scope".to_string()
+                        "Syntax Error: Goto statements are not allowed in this scope".to_string(),
                     );
                 }
                 self.parse_goto_stmt()
@@ -483,7 +549,10 @@ impl Parser {
                     } else {
                         err_str.trim()
                     };
-                    format!("Syntax Error: {} (at line {}, column {})", clean, tok.line, tok.column)
+                    format!(
+                        "Syntax Error: {} (at line {}, column {})",
+                        clean, tok.line, tok.column
+                    )
                 };
                 self.synchronize();
                 Err(err_msg)
@@ -502,16 +571,16 @@ impl Parser {
         }
     }
 
-    pub(crate) fn get_handle_identifier(&mut self, err_msg: &str) -> Result<String, String> {
+    pub(crate) fn get_member_identifier(&mut self, err_msg: &str) -> Result<String, String> {
         match &self.peek().kind {
             TokenKind::Identifier(n) => {
                 let s = n.clone();
                 self.advance();
                 Ok(s)
             }
-            TokenKind::Call => {
+            TokenKind::New => {
                 self.advance();
-                Ok("call".to_string())
+                Ok("new".to_string())
             }
             TokenKind::Return => {
                 self.advance();
@@ -541,7 +610,39 @@ impl Parser {
                 self.advance();
                 Ok("share".to_string())
             }
+            TokenKind::Del => {
+                self.advance();
+                Ok("del".to_string())
+            }
+            TokenKind::Set => {
+                self.advance();
+                Ok("set".to_string())
+            }
+            TokenKind::Init => {
+                self.advance();
+                Ok("init".to_string())
+            }
+            TokenKind::Constructor => {
+                self.advance();
+                Ok("constructor".to_string())
+            }
+            TokenKind::ToString => {
+                self.advance();
+                Ok("to_string".to_string())
+            }
+            TokenKind::Match => {
+                self.advance();
+                Ok("match".to_string())
+            }
+            TokenKind::Flag => {
+                self.advance();
+                Ok("flag".to_string())
+            }
             _ => Err(err_msg.to_string()),
         }
+    }
+
+    pub(crate) fn get_handle_identifier(&mut self, err_msg: &str) -> Result<String, String> {
+        self.get_member_identifier(err_msg)
     }
 }

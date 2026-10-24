@@ -33,7 +33,7 @@ fn test_primitives_and_sizes() -> void {
     println("i16: ", i16);   // EXPECT: i16: 32767
     println("i32: ", i32);   // EXPECT: i32: 2147483647
     println("u32: ", u32);   // EXPECT: u32: 4000000000
-    println("f32: ", f32)    // EXPECT: f32: 3.14
+    println("f32: ", f32);   // EXPECT: f32: 3.14
     println("bool: ", is_fast); // EXPECT: bool: true
     println("char: ", letter);  // EXPECT: char: F
 }

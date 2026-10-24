@@ -11,7 +11,7 @@ use crate::project::{
 
 pub fn print_help() {
     println!(
-        r#"FastLang Compiler (fast / fast_lang) v0.1.6-beta
+        r#"FastLang Compiler (fast / fast_lang) v0.1.6-alpha
 High-performance compiled language with fine-grained memory management and explicit scopes.
 
 USAGE:
@@ -114,7 +114,11 @@ pub fn run_project_tests(project_root: &Path) -> Result<(), ()> {
     entries.sort();
 
     println!("\n=== Running FastLang Project Tests ===");
-    println!("Found {} test(s) in {}\n", entries.len(), tests_dir.display());
+    println!(
+        "Found {} test(s) in {}\n",
+        entries.len(),
+        tests_dir.display()
+    );
 
     let self_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("fast_lang"));
     let mut passed = 0;
@@ -265,7 +269,11 @@ pub fn handle_subcommands(args: &[String]) -> bool {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         match scaffold::create_new_project(&name, &cwd, p_type, non_interactive) {
             Ok(dir) => {
-                println!("Created new FastLang project '{}' at {}", name, dir.display());
+                println!(
+                    "Created new FastLang project '{}' at {}",
+                    name,
+                    dir.display()
+                );
                 println!("Get started with:");
                 if name != "." {
                     println!("  cd {}", name);
@@ -299,7 +307,11 @@ pub fn handle_subcommands(args: &[String]) -> bool {
         }
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let proj_name = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("my_project").to_string();
+        let proj_name = cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("my_project")
+            .to_string();
         let target_type = p_type.unwrap_or(ProjectType::Bin);
 
         match scaffold::init_project_in_dir(&cwd, proj_name, target_type) {
@@ -322,7 +334,9 @@ pub fn handle_subcommands(args: &[String]) -> bool {
             "list" => {
                 let config = GlobalConfig::load();
                 if config.library_paths.is_empty() {
-                    println!("No global library paths registered. Add one using 'fast lib add <path>'.");
+                    println!(
+                        "No global library paths registered. Add one using 'fast lib add <path>'."
+                    );
                 } else {
                     println!("Registered Global Library Paths:");
                     for (i, p) in config.library_paths.iter().enumerate() {
@@ -340,7 +354,10 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                 };
                 let lib_path = Path::new(lib_path_arg);
                 if !lib_path.exists() {
-                    eprintln!("Warning: path '{}' does not currently exist on disk.", lib_path.display());
+                    eprintln!(
+                        "Warning: path '{}' does not currently exist on disk.",
+                        lib_path.display()
+                    );
                 }
                 let mut config = GlobalConfig::load();
                 match config.add_library_path(lib_path) {
@@ -367,7 +384,10 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                         println!("Removed global library path: {}", lib_path_arg);
                     }
                     Ok(false) => {
-                        println!("Path '{}' was not found in registered libraries.", lib_path_arg);
+                        println!(
+                            "Path '{}' was not found in registered libraries.",
+                            lib_path_arg
+                        );
                     }
                     Err(e) => {
                         eprintln!("Failed to save global config: {}", e);
@@ -376,7 +396,10 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                 }
             }
             other => {
-                eprintln!("Unknown lib subcommand '{}'. Use 'add', 'list', or 'remove'.", other);
+                eprintln!(
+                    "Unknown lib subcommand '{}'. Use 'add', 'list', or 'remove'.",
+                    other
+                );
                 exit(1);
             }
         }
@@ -429,7 +452,10 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                     description,
                 };
                 match reg.add(dep) {
-                    Ok(_) => println!("Successfully registered package '{}' in known registry.", name),
+                    Ok(_) => println!(
+                        "Successfully registered package '{}' in known registry.",
+                        name
+                    ),
                     Err(e) => {
                         eprintln!("Failed to save registry: {}", e);
                         exit(1);
@@ -447,7 +473,10 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                 let mut reg = DependencyRegistry::load();
                 match reg.import_file(file_path) {
                     Ok(count) => {
-                        println!("Successfully imported {} package(s) into known dependency registry.", count);
+                        println!(
+                            "Successfully imported {} package(s) into known dependency registry.",
+                            count
+                        );
                     }
                     Err(e) => {
                         eprintln!("Import failed: {}", e);
@@ -456,7 +485,10 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                 }
             }
             other => {
-                eprintln!("Unknown registry subcommand '{}'. Use 'list', 'add', or 'import'.", other);
+                eprintln!(
+                    "Unknown registry subcommand '{}'. Use 'list', 'add', or 'import'.",
+                    other
+                );
                 exit(1);
             }
         }
@@ -494,12 +526,19 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                 };
                 let req_version = args.get(pkg_name_idx + 1).cloned();
 
-                match resolve_and_fetch_dependency(&pkg_name, req_version.as_deref(), &packages_dir) {
+                match resolve_and_fetch_dependency(&pkg_name, req_version.as_deref(), &packages_dir)
+                {
                     Ok(_) => {
                         let deps = manifest.dependencies.get_or_insert_with(HashMap::new);
-                        deps.insert(pkg_name.clone(), req_version.unwrap_or_else(|| "latest".to_string()));
+                        deps.insert(
+                            pkg_name.clone(),
+                            req_version.unwrap_or_else(|| "latest".to_string()),
+                        );
                         let _ = manifest.save_to_file(&project_root.join("Fast.toml"));
-                        println!("Package '{}' added to Fast.toml and installed in packages/.", pkg_name);
+                        println!(
+                            "Package '{}' added to Fast.toml and installed in packages/.",
+                            pkg_name
+                        );
                     }
                     Err(e) => {
                         eprintln!("Error: {}", e);
@@ -509,9 +548,14 @@ pub fn handle_subcommands(args: &[String]) -> bool {
             }
             "install" => {
                 if let Some(ref deps) = manifest.dependencies {
-                    println!("Installing dependencies from Fast.toml ({} packages)...", deps.len());
+                    println!(
+                        "Installing dependencies from Fast.toml ({} packages)...",
+                        deps.len()
+                    );
                     for (name, ver) in deps {
-                        if let Err(e) = resolve_and_fetch_dependency(name, Some(ver.as_str()), &packages_dir) {
+                        if let Err(e) =
+                            resolve_and_fetch_dependency(name, Some(ver.as_str()), &packages_dir)
+                        {
                             eprintln!("Warning: Failed to install package '{}': {}", name, e);
                         }
                     }
@@ -521,7 +565,10 @@ pub fn handle_subcommands(args: &[String]) -> bool {
                 }
             }
             other => {
-                eprintln!("Unknown pkg subcommand '{}'. Use 'add' or 'install'.", other);
+                eprintln!(
+                    "Unknown pkg subcommand '{}'. Use 'add' or 'install'.",
+                    other
+                );
                 exit(1);
             }
         }
@@ -703,7 +750,11 @@ pub fn parse_cli(args: &[String]) -> CliOptions {
             } else {
                 i += 1;
             }
-        } else if args[i] == "--debug" || args[i] == "-d" || args[i] == "--verbose" || args[i] == "-v" {
+        } else if args[i] == "--debug"
+            || args[i] == "-d"
+            || args[i] == "--verbose"
+            || args[i] == "-v"
+        {
             debug = true;
             i += 1;
         } else if args[i] == "--debug-error" || args[i] == "--debug-errors" {
@@ -774,7 +825,8 @@ pub fn parse_cli(args: &[String]) -> CliOptions {
 
     let is_test_file = {
         let pb = Path::new(&path);
-        pb.components().any(|c| c.as_os_str() == "tests" || c.as_os_str() == "test")
+        pb.components()
+            .any(|c| c.as_os_str() == "tests" || c.as_os_str() == "test")
     };
 
     let is_module_project = !is_test_file

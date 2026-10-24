@@ -69,6 +69,48 @@ impl CompilerIntrinsics {
             return_type: "System",
             description: "Compile-time host system detection",
         },
+        IntrinsicSignature {
+            name: "time",
+            min_args: 0,
+            max_args: 0,
+            return_type: "Time",
+            description: "Compile-time timestamp returning Time struct",
+        },
+        IntrinsicSignature {
+            name: "create_ident",
+            min_args: 1,
+            max_args: 1,
+            return_type: "ident",
+            description: "Compile-time identifier constructor",
+        },
+        IntrinsicSignature {
+            name: "open",
+            min_args: 1,
+            max_args: 1,
+            return_type: "str",
+            description: "Compile-time file open and read",
+        },
+        IntrinsicSignature {
+            name: "write",
+            min_args: 2,
+            max_args: 2,
+            return_type: "void",
+            description: "Compile-time file write",
+        },
+        IntrinsicSignature {
+            name: "toml",
+            min_args: 1,
+            max_args: 1,
+            return_type: "unknown",
+            description: "Compile-time TOML parser helper",
+        },
+        IntrinsicSignature {
+            name: "get_toml",
+            min_args: 1,
+            max_args: 1,
+            return_type: "unknown",
+            description: "Compile-time read and parse TOML file",
+        },
     ];
 
     pub const TYPE_PROPERTIES: &'static [&'static str] = &[

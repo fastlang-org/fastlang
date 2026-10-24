@@ -1,5 +1,8 @@
 // Comprehensive Suite 06: OOP, Blueprints, Defaults, Inheritance, and Operator Overloading
 import std::fmt;
+import std::time;
+
+using time;
 
 blueprint PointBp = {
     x := 100;
@@ -97,10 +100,90 @@ fn test_operator_overloading() -> void {
     println("c1 as int: ", c1_cast); // EXPECT: c1 as int: 3
 }
 
+blueprint ShareCell -> {
+    int32 owners = 0;
+}
+
+impl ShareCell -> {
+    handle -> {
+        fn share() -> void {
+            this.owners = this.owners + 1;
+        }
+    }
+}
+
+blueprint UniqueTracker<T> -> {
+    T* ptr = undefined;
+    ShareCell* cell = undefined;
+    int32 sync_count = 0;
+    share cell if (this.ptr == other.ptr) {
+        this.sync_count = this.sync_count + 1;
+    }
+}
+
+fn test_share_with_then_block() -> void {
+    int32 val = 42;
+    UniqueTracker<int32> u1 = &val;
+    UniqueTracker<int32> u2 = u1;
+    println("u1 sync: ", u1.sync_count); // EXPECT: u1 sync: 0
+    println("u2 sync: ", u2.sync_count); // EXPECT: u2 sync: 1
+}
+
+struct StaticDemo {
+    int32 val;
+
+    static {
+        fn compute(a: int32, b: int32) -> int32 {
+            return a + b;
+        }
+    }
+}
+
+impl StaticDemo {
+    static {
+        fn multiply(a: int32, b: int32) -> int32 {
+            return a * b;
+        }
+    }
+}
+
+impl static for StaticDemo {
+    fn greet() -> str {
+        return "Static block works!";
+    }
+}
+
+fn test_static_blocks_and_time() -> void {
+    int32 sum = StaticDemo::compute(10, 20);
+    println("Static sum: ", sum); // EXPECT: Static sum: 30
+
+    int32 prod = StaticDemo::multiply(5, 6);
+    println("Static prod: ", prod); // EXPECT: Static prod: 30
+
+    str greeting = StaticDemo::greet();
+    println("Static greet: ", greeting); // EXPECT: Static greet: Static block works!
+
+    Timer t = Timer::new();
+    t.reset();
+    t.update();
+    Time elapsed = t.taken();
+    println("Timer elapsed valid: ", elapsed.timestamp_ms >= 0); // EXPECT: Timer elapsed valid: true
+   
+    Time t_now = Time::now();
+    println("Time year valid: ", t_now.year > 2020); // EXPECT: Time year valid: true
+    println("Time printed: ", t_now);
+
+    Time t_ct = @compile::time();
+    println("Comptime year valid: ", t_ct.year > 2020); // EXPECT: Comptime year valid: true
+    println("Comptime time printed: ", t_ct);
+}
+
 fn main() -> int32 {
     test_blueprint_defaults();
     test_inheritance_and_polymorphism();
     test_operator_overloading();
+    test_share_with_then_block();
+    test_static_blocks_and_time();
 
     println("ALL 06_OOP_AND_BLUEPRINTS TESTS PASSED"); // EXPECT: ALL 06_OOP_AND_BLUEPRINTS TESTS PASSED
     return 0;

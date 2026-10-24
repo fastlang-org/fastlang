@@ -15,6 +15,7 @@ pub mod directive_scope;
 pub mod enum_decl;
 pub mod function_decl;
 pub mod machine;
+pub mod macro_decl;
 pub mod struct_decl;
 
 impl Parser {

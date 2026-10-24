@@ -9,6 +9,26 @@ extern @c :: {
 
 extern @c fn abs(n: int32) -> int32;
 
+extern @c "math.h" :: {
+    fn cos(x: float64) -> float64;
+}
+
+extern @c "tests/test_ffi_header.h" :: {
+    type CustomDevId = int32;
+    enum TestStatus : int32 {
+        [0] = TEST_STATUS_OFF,
+        [1] = TEST_STATUS_ON,
+        [2] = TEST_STATUS_UNKNOWN
+    }
+    struct TestDevice {
+        int32 id;
+        int32 val;
+        float64 scale;
+    }
+    fn make_device(id: int32, val: int32, scale: float64) -> TestDevice;
+    fn compute_device_score(dev: TestDevice) -> int32;
+}
+
 public math_ops {
     public fn multiply(a: int32, b: int32) -> int32 {
         return a * b;
@@ -31,6 +51,16 @@ fn main() -> int32 {
     int32 neg = -42;
     int32 pos = abs(neg);
     println("abs: ", pos); // EXPECT: abs: 42
+
+    float64 c = cos(0.0);
+    println("cos: ", c); // EXPECT: cos: 1
+
+    CustomDevId my_id = 10;
+    TestDevice dev = make_device(my_id, 20, 2.0);
+    println("dev.id: ", dev.id); // EXPECT: dev.id: 10
+    println("dev.val: ", dev.val); // EXPECT: dev.val: 20
+    int32 score = compute_device_score(dev);
+    println("score: ", score); // EXPECT: score: 50
 
     println("ALL 11_MODULES_AND_FFI TESTS PASSED"); // EXPECT: ALL 11_MODULES_AND_FFI TESTS PASSED
     return 0;

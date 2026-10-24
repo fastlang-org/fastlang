@@ -1,0 +1,238 @@
+import @c "clib/time.h";
+
+extern @c :: {
+    fn fast_time_get_year() -> int32;
+    fn fast_time_get_month() -> int32;
+    fn fast_time_get_day() -> int32;
+    fn fast_time_get_day_of_week() -> int32;
+    fn fast_time_get_hour() -> int32;
+    fn fast_time_get_minute() -> int32;
+    fn fast_time_get_second() -> int32;
+    fn fast_time_get_millisecond() -> int32;
+    fn fast_time_steady_ms() -> int64;
+    fn fast_time_steady_ns() -> int64;
+    fn fast_time_epoch_ms() -> int64;
+    fn fast_time_sleep_ms(ms: int64) -> void;
+}
+
+public enum Day : int32 {
+    [0] = Sunday,
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+}
+public impl Day -> {
+    fn as_str() -> str {
+        match this {
+            Day::Sunday => "Sunday",
+            Day::Monday => "Monday",
+            Day::Tuesday => "Tuesday",
+            Day::Wednesday => "Wednesday",
+            Day::Thursday => "Thursday",
+            Day::Friday => "Friday",
+            Day::Saturday => "Saturday",
+        }
+    }
+    handle -> {
+        fn display() -> str {
+            return this.as_str();
+        }
+    }
+}
+public blueprint Time = {
+    int32 year;
+    int32 month;
+    int32 day;
+    Day day_of_week;
+    int32 hour;
+    int32 minute;
+    int32 second;
+    int32 millisecond;
+    int32 days;
+    int32 hours;
+    int32 minutes;
+    int32 seconds;
+    int32 milliseconds;
+    int64 timestamp_ms;
+}
+
+public impl Time {
+    static {
+        fn now() -> Time {
+            int32 y = fast_time_get_year();
+            int32 m = fast_time_get_month();
+            int32 d = fast_time_get_day();
+            int32 dow_int = fast_time_get_day_of_week();
+            Day dow = Day::Sunday;
+            match dow_int {
+                0 => dow = Day::Sunday,
+                1 => dow = Day::Monday,
+                2 => dow = Day::Tuesday,
+                3 => dow = Day::Wednesday,
+                4 => dow = Day::Thursday,
+                5 => dow = Day::Friday,
+                6 => dow = Day::Saturday,
+                _ => dow = Day::Sunday,
+            }
+            int32 h = fast_time_get_hour();
+            int32 min = fast_time_get_minute();
+            int32 s = fast_time_get_second();
+            int32 ms = fast_time_get_millisecond();
+            int64 ts = fast_time_steady_ms();
+            return Time {
+                year = y,
+                month = m,
+                day = d,
+                day_of_week = dow,
+                hour = h,
+                minute = min,
+                second = s,
+                millisecond = ms,
+                days = d,
+                hours = h,
+                minutes = min,
+                seconds = s,
+                milliseconds = ms,
+                timestamp_ms = ts,
+            };
+        }
+    }
+
+    handle {
+        fn display() -> str {
+            if (this.year > 0) {
+                return this.day_of_week.as_str() + " " + this.year.as_str() + "-" + this.month.as_str() + "-" + this.day.as_str() + " " + this.hour.as_str() + ":" + this.minute.as_str() + ":" + this.second.as_str() + "." + this.millisecond.as_str();
+            } else {
+                return this.hours.as_str() + "h " + this.minutes.as_str() + "m " + this.seconds.as_str() + "s " + this.milliseconds.as_str() + "ms";
+            }
+        }
+
+        fn sub(other: Time) -> Time {
+            int64 diff = this.timestamp_ms - other.timestamp_ms;
+            if (diff < 0) {
+                diff = 0;
+            }
+            int64 total_sec = diff / 1000;
+            int32 ms_rem = (diff % 1000) as int32;
+            int32 s_rem = (total_sec % 60) as int32;
+            int64 total_min = total_sec / 60;
+            int32 m_rem = (total_min % 60) as int32;
+            int64 total_hr = total_min / 60;
+            int32 h_rem = (total_hr % 24) as int32;
+            int32 d_rem = (total_hr / 24) as int32;
+
+            return Time {
+                year = 0,
+                month = 0,
+                day = d_rem,
+                day_of_week = Day::Sunday,
+                hour = h_rem,
+                minute = m_rem,
+                second = s_rem,
+                millisecond = ms_rem,
+                days = d_rem,
+                hours = h_rem,
+                minutes = m_rem,
+                seconds = s_rem,
+                milliseconds = ms_rem,
+                timestamp_ms = diff,
+            };
+        }
+    }
+}
+
+public struct Timer {
+    private {
+        Time start;
+        Time last_update;
+        Time elapsed;
+    }
+
+    static {
+        fn now() -> Time {
+            return Time::now();
+        }
+
+        fn $new() -> Timer {
+            return Timer {
+                start = Time::now(),
+                last_update = Time::now(),
+                elapsed = Time {
+                    year = 0,
+                    month = 0,
+                    day = 0,
+                    day_of_week = Day::Sunday,
+                    hour = 0,
+                    minute = 0,
+                    second = 0,
+                    millisecond = 0,
+                    days = 0,
+                    hours = 0,
+                    minutes = 0,
+                    seconds = 0,
+                    milliseconds = 0,
+                    timestamp_ms = 0,
+                },
+            };
+        }
+    }
+
+    public {
+        fn reset() -> void {
+            this.start = Time::now();
+            this.last_update = Time::now();
+        }
+
+        fn update() -> void {
+            this.last_update = Time::now();
+        }
+
+        fn taken() -> Time {
+            this.elapsed = Time::now() - this.start;
+            return this.elapsed;
+        }
+    }
+}
+
+public @compile :: {
+    set time() -> Time;
+}
+
+public method time() -> Time {
+    return Time::now();
+}
+
+public blueprint Instant = {
+    int64 nanos;
+}
+
+public impl Instant -> {
+    static {
+        fn now() -> Instant {
+            Instant inst;
+            inst.nanos = fast_time_steady_ns();
+            return inst;
+        }
+    }
+    handle {
+        fn display() -> char[] {
+            return (this.nanos as str);
+        }
+    }
+    fn elapsed_nanos() -> int64 {
+        return fast_time_steady_ns() - this.nanos;
+    }
+    fn elapsed_micros() -> float64 {
+        return ((fast_time_steady_ns() - this.nanos) as float64) / 1000.0;
+    }
+    fn elapsed_millis() -> float64 {
+        return ((fast_time_steady_ns() - this.nanos) as float64) / 1000000.0;
+    }
+}
+
+public fn sleep(ms: int64) -> void {
+    fast_time_sleep_ms(ms);
+}

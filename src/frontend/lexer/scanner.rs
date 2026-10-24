@@ -5,14 +5,31 @@ pub struct Scanner {
     position: usize,
     line: usize,
     column: usize,
-    template_tag_pending: bool,
     in_template: bool,
     template_stack: Vec<usize>,
     code_brace_stack: Vec<usize>,
     at_f_pending: bool,
+    template_tag_pending: bool,
 }
 
 impl Scanner {
+    pub fn scan_all(source: &str) -> Vec<Token> {
+        let mut scanner = Scanner::new(source.to_string());
+        let mut tokens: Vec<Token> = Vec::new();
+        loop {
+            let tok = scanner.next_token();
+            let is_eof = tok.kind == TokenKind::EOF;
+            match tok.kind {
+                TokenKind::InlineComment | TokenKind::MultiLineComment => {}
+                _ => tokens.push(tok),
+            }
+            if is_eof {
+                break;
+            }
+        }
+        tokens
+    }
+
     pub fn new(source: String) -> Self {
         let clean_source = source.strip_prefix('\u{feff}').unwrap_or(&source);
         Scanner {
@@ -20,11 +37,11 @@ impl Scanner {
             position: 0,
             line: 1,
             column: 1,
-            template_tag_pending: false,
             in_template: false,
             template_stack: Vec::new(),
             code_brace_stack: Vec::new(),
             at_f_pending: false,
+            template_tag_pending: false,
         }
     }
 
@@ -109,7 +126,6 @@ impl Scanner {
             "super" => Some(TokenKind::Super),
             "label" => Some(TokenKind::Label),
             "goto" => Some(TokenKind::Goto),
-            "call" => Some(TokenKind::Call),
             "yield" => Some(TokenKind::Yield),
             "leave" => Some(TokenKind::Leave),
 
@@ -176,7 +192,6 @@ impl Scanner {
             "void" => Some(TokenKind::TypeVoid),
             "object" => Some(TokenKind::TypeObject),
             "block" => Some(TokenKind::TypeBlock),
-            "micro" => Some(TokenKind::TypeMicro),
             "macro" => Some(TokenKind::TypeMacro),
             "lambda" => Some(TokenKind::TypeLambda),
 
@@ -331,7 +346,11 @@ impl Scanner {
                     }
                     self.at_f_pending = true;
                     self.in_template = false;
-                    return Token::new(TokenKind::LabelName("@f".to_string()), start_line, start_column);
+                    return Token::new(
+                        TokenKind::LabelName("@f".to_string()),
+                        start_line,
+                        start_column,
+                    );
                 }
             }
 
@@ -341,7 +360,8 @@ impl Scanner {
                     if depth == 1 {
                         self.advance(); // consume '}'
                         self.template_stack.pop();
-                        self.in_template = !self.template_stack.is_empty() && self.code_brace_stack.is_empty();
+                        self.in_template =
+                            !self.template_stack.is_empty() && self.code_brace_stack.is_empty();
                         return Token::new(TokenKind::RBrace, start_line, start_column);
                     }
                 }
@@ -455,10 +475,14 @@ impl Scanner {
                         break;
                     }
                 }
-                if matches!(word.as_str(), "@html" | "@json" | "@safe" | "@raw") {
-                    self.template_tag_pending = true;
+                if word.len() == 1 {
+                    TokenKind::At
+                } else {
+                    if matches!(word.as_str(), "@html" | "@json" | "@safe" | "@raw") {
+                        self.template_tag_pending = true;
+                    }
+                    TokenKind::LabelName(word.clone())
                 }
-                TokenKind::LabelName(word.clone())
             }
             '0'..='9' => {
                 let start_line = self.line;
@@ -803,6 +827,9 @@ impl Scanner {
                 if let Some('=') = self.peek() {
                     self.advance();
                     TokenKind::GreaterEq
+                } else if let Some('>') = self.peek() {
+                    self.advance();
+                    TokenKind::ShiftRight
                 } else {
                     TokenKind::Greater
                 }
@@ -811,8 +838,70 @@ impl Scanner {
                 if let Some('=') = self.peek() {
                     self.advance();
                     TokenKind::LessEq
+                } else if let Some('<') = self.peek() {
+                    self.advance();
+                    TokenKind::ShiftLeft
                 } else {
                     TokenKind::Less
+                }
+            }
+            '^' => TokenKind::Caret,
+            '#' => {
+                if let Some('{') = self.peek() {
+                    self.advance(); // consume '{'
+                    let _start_line: usize = self.line;
+                    let mut text = String::new();
+                    let mut depth = 1;
+                    while !self.is_at_end() {
+                        let ch = self.advance().unwrap();
+                        if ch == '{' {
+                            depth += 1;
+                            text.push(ch);
+                        } else if ch == '}' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                            text.push(ch);
+                        } else {
+                            if ch == '\n' {
+                                self.line += 1;
+                                self.column = 1;
+                            }
+                            text.push(ch);
+                        }
+                    }
+                    TokenKind::TemplateText(text)
+                } else {
+                    TokenKind::Hash
+                }
+            }
+            '`' => {
+                let start_line = self.line;
+                let mut text = String::new();
+                let mut closed = false;
+                while !self.is_at_end() {
+                    let ch = self.advance().unwrap();
+                    if ch == '`' {
+                        closed = true;
+                        break;
+                    }
+                    if ch == '\n' {
+                        self.line += 1;
+                        self.column = 1;
+                    }
+                    text.push(ch);
+                }
+                if !closed {
+                    TokenKind::Error(format!("Unterminated raw template delimited by backticks at line {}", start_line))
+                } else {
+                    let trimmed = text.trim();
+                    let inner = if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                        &trimmed[1..trimmed.len() - 1]
+                    } else {
+                        trimmed
+                    };
+                    TokenKind::TemplateText(inner.to_string())
                 }
             }
 

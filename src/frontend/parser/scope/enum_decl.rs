@@ -18,14 +18,154 @@ impl Parser {
                 }
             }
         }
+        let mut underlying_type = None;
+        if self.peek().kind == TokenKind::Colon {
+            self.advance(); // consume ':'
+            underlying_type = Some(self.parse_type()?);
+        } else if self.peek().kind == TokenKind::Using {
+            self.advance(); // consume 'using'
+            underlying_type = Some(self.parse_type()?);
+        }
         if self.peek().kind == TokenKind::Arrow {
             self.advance();
         }
         self.consume(TokenKind::LBrace, "Expected '{' to open enum body")?;
+        let mut current_counter: i64 = 0;
+        let mut step: i64 = 1;
+        let mut is_first: bool = true;
+        let mut saved_counter_before_jump: Option<i64> = None;
+        let mut has_jumped: bool = false;
+
         while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
             let t = self.peek().kind.clone();
 
-            if matches!(t, TokenKind::Identifier(_)) {
+            if t == TokenKind::Set {
+                self.advance(); // consume 'set'
+                let var_name = self.get_identifier("Expected 'i' or 'iota' after 'set' in enum")?;
+                if var_name != "i" && var_name != "iota" {
+                    return Err(format!("Syntax Error: Expected 'i' or 'iota' after 'set' in enum, found '{}'", var_name));
+                }
+                self.consume(TokenKind::Assign, "Expected '=' after set i")?;
+                let step_expr = self.parse_expression()?;
+                let step_val = match step_expr {
+                    Expr::LiteralInt(v) => v as i64,
+                    Expr::LiteralUInt(v) => v as i64,
+                    _ => return Err("Syntax Error: 'set i' step must be an integer literal".to_string()),
+                };
+                step = step_val;
+                self.consume(TokenKind::SemiColon, "Expected ';' after set statement in enum")?;
+                continue;
+            }
+
+            if t == TokenKind::Continue {
+                self.advance(); // consume 'continue'
+                self.consume(TokenKind::SemiColon, "Expected ';' after continue in enum")?;
+                if let Some(saved) = saved_counter_before_jump.take() {
+                    current_counter = saved;
+                    has_jumped = false;
+                }
+                continue;
+            }
+
+            let is_paren_prefix = if self.peek().kind == TokenKind::LParen {
+                let mut offset = 1;
+                let mut depth = 1;
+                while let Some(tok) = self.peek_ahead(offset) {
+                    if tok.kind == TokenKind::LParen {
+                        depth += 1;
+                    } else if tok.kind == TokenKind::RParen {
+                        depth -= 1;
+                        if depth == 0 {
+                            offset += 1;
+                            break;
+                        }
+                    }
+                    offset += 1;
+                }
+                if let Some(next) = self.peek_ahead(offset) {
+                    next.kind == TokenKind::Assign
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if t == TokenKind::LBracket || is_paren_prefix || matches!(t, TokenKind::Identifier(_)) {
+                let mut is_default = false;
+                let discriminant = if is_paren_prefix {
+                    self.advance(); // consume '('
+                    let disc_expr = if self.peek().kind == TokenKind::RParen {
+                        None
+                    } else {
+                        Some(self.parse_expression()?)
+                    };
+                    self.consume(TokenKind::RParen, "Expected ')' after default enum variant")?;
+                    self.consume(TokenKind::Assign, "Expected '=' after default variant")?;
+                    is_default = true;
+                    if let Some(ref expr) = disc_expr {
+                        if let Expr::LiteralInt(v) = expr {
+                            current_counter = *v as i64;
+                        } else if let Expr::LiteralUInt(v) = expr {
+                            current_counter = *v as i64;
+                        }
+                        is_first = false;
+                        Some(expr.clone())
+                    } else {
+                        if is_first {
+                            current_counter = 0;
+                            is_first = false;
+                        } else {
+                            current_counter += step;
+                        }
+                        Some(Expr::LiteralInt(current_counter as i128))
+                    }
+                } else if self.peek().kind == TokenKind::LBracket {
+                    self.advance(); // consume '['
+                    let disc_expr = if self.peek().kind == TokenKind::RBracket {
+                        None
+                    } else {
+                        Some(self.parse_expression()?)
+                    };
+                    self.consume(
+                        TokenKind::RBracket,
+                        "Expected ']' after enum variant discriminant",
+                    )?;
+                    self.consume(
+                        TokenKind::Assign,
+                        "Expected '=' after '[...]' in enum variant declaration",
+                    )?;
+                    if !is_first && !has_jumped {
+                        saved_counter_before_jump = Some(current_counter);
+                        has_jumped = true;
+                    }
+                    if let Some(ref expr) = disc_expr {
+                        if let Expr::LiteralInt(v) = expr {
+                            current_counter = *v as i64;
+                        } else if let Expr::LiteralUInt(v) = expr {
+                            current_counter = *v as i64;
+                        }
+                        is_first = false;
+                        Some(expr.clone())
+                    } else {
+                        if is_first {
+                            current_counter = 0;
+                            is_first = false;
+                        } else {
+                            current_counter += step;
+                        }
+                        Some(Expr::LiteralInt(current_counter as i128))
+                    }
+                } else {
+                    if is_first {
+                        current_counter = 0;
+                        is_first = false;
+                    } else {
+                        current_counter += step;
+                    }
+                    Some(Expr::LiteralInt(current_counter as i128))
+                };
+
                 let variant_name = self.get_identifier("Expected enum variant name")?;
                 let mut payload = EnumVariantPayload::None;
                 let mut data_type = None;
@@ -52,7 +192,9 @@ impl Parser {
                     let mut struct_fields = Vec::new();
                     while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
                         // Support both: `Type name;` and `name: Type;`
-                        let is_colon_syntax = if let Some(next_tok) = self.tokens.get(self.current + 1) {
+                        let is_colon_syntax = if let Some(next_tok) =
+                            self.tokens.get(self.current + 1)
+                        {
                             next_tok.kind == TokenKind::Colon || next_tok.kind == TokenKind::Walrus
                         } else {
                             false
@@ -64,7 +206,9 @@ impl Parser {
                         } else {
                             let field_type = self.parse_type()?;
                             let field_name = self.get_identifier("Expected field name")?;
-                            let default_val = if self.peek().kind == TokenKind::Assign || self.peek().kind == TokenKind::Walrus {
+                            let default_val = if self.peek().kind == TokenKind::Assign
+                                || self.peek().kind == TokenKind::Walrus
+                            {
                                 self.advance();
                                 Some(self.parse_expression()?)
                             } else {
@@ -77,22 +221,30 @@ impl Parser {
                                 is_variadic: false,
                             });
                         }
-                        if self.peek().kind == TokenKind::SemiColon || self.peek().kind == TokenKind::Comma {
+                        if self.peek().kind == TokenKind::SemiColon
+                            || self.peek().kind == TokenKind::Comma
+                        {
                             self.advance();
                         }
                     }
-                    self.consume(TokenKind::RBrace, "Expected '}' to close struct variant body")?;
+                    self.consume(
+                        TokenKind::RBrace,
+                        "Expected '}' to close struct variant body",
+                    )?;
                     payload = EnumVariantPayload::Struct(struct_fields);
                 }
 
-                if self.peek().kind == TokenKind::Comma || self.peek().kind == TokenKind::SemiColon {
+                if self.peek().kind == TokenKind::Comma || self.peek().kind == TokenKind::SemiColon
+                {
                     self.advance();
                 }
 
                 variants.push(EnumVariant {
                     name: variant_name,
+                    discriminant,
                     payload,
                     data_type,
+                    is_default,
                 });
             } else {
                 for g in &generics {
@@ -100,19 +252,23 @@ impl Parser {
                         self.current_generics.remove(gen_name);
                     }
                 }
-                return Err(
-                    format!(
-                        "Syntax Error: Unsupported token '{}' in enum at line {}, column {}",
-                        t.as_str(),
-                        self.peek().line,
-                        self.peek().column
-                    )
-                );
+                return Err(format!(
+                    "Syntax Error: Unsupported token '{}' in enum at line {}, column {}",
+                    t.as_str(),
+                    self.peek().line,
+                    self.peek().column
+                ));
             }
         }
         let mut meta = TypeMetadata {
             name: name.clone(),
-            ty: BaseType::Enum { name: name.clone(), variants: variants.clone(), methods: Box::new(std::collections::HashMap::new()), generics: generics.clone() },
+            ty: BaseType::Enum {
+                name: name.clone(),
+                underlying_type: underlying_type.clone().map(Box::new),
+                variants: variants.clone(),
+                methods: Box::new(std::collections::HashMap::new()),
+                generics: generics.clone(),
+            },
             fields: std::collections::HashMap::new(),
             constructor: None,
             methods: std::collections::HashMap::new(),
@@ -122,7 +278,8 @@ impl Parser {
             variants: Some(variants.clone()),
         };
         for variant in &variants {
-            meta.fields.insert(variant.name.clone(), BaseType::from_str(&name));
+            meta.fields
+                .insert(variant.name.clone(), BaseType::from_str(&name));
 
             let variant_full_name = format!("{}::{}", name, variant.name);
             let mut var_fields = std::collections::HashMap::new();
@@ -176,6 +333,7 @@ impl Parser {
         Ok(Decl::EnumDecl {
             visibility: Visibility::Private,
             name,
+            underlying_type,
             generics,
             handles: Vec::new(),
             handle_block: Vec::new(),

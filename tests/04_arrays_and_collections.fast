@@ -121,13 +121,11 @@ fn test_std_range() -> void {
     }
     println("");
     // EXPECT: a c e
-    /*
-    int arr[] = rand_range<int>(10);
-    for r in arr //*rand_range<int32>(10) {
+    for r in 0..10 {
         print(r, " ");
     }
     println("");
-    */
+    // EXPECT: 0 1 2 3 4 5 6 7 8 9
 }
 // test chain method in for in loop
 

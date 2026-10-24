@@ -50,12 +50,11 @@ pub enum TokenKind {
     Throw, // throw
 
     //new meta
-    Leave,             // leave
-    Yield,             // yield
-    Goto,              // goto
-    Call,              // call
-    Label,             // label
-    LabelName(String), // label_name  @string
+    Leave,                // leave
+    Yield,                // yield
+    Goto,                 // goto
+    Label,                // label //! todo: remove it
+    LabelName(String),    // label_name  @string
     TemplateText(String), // Raw template text inside foreign blocks
     // comments
     MultiLineComment,
@@ -88,16 +87,15 @@ pub enum TokenKind {
     // blueprint support
     Impl, // impl
     //scopes types
-    TypeObject, // object    //* with oop scopes and custom
-    TypeStruct, // struct
-    TypeBlock,  // block
-    TypeMicro,  // micro
-    TypeMacro,  // macro
-    TypeClass,  // class
-    TypeEnum,   // enum
-    TypeMethod, // method
-    TypeFn,     // Fn
-    TypeLambda, // lambda
+    TypeObject,   // object    //* with oop scopes and custom
+    TypeStruct,   // struct
+    TypeBlock,    // block
+    TypeMacro,    // macro
+    TypeClass,    // class
+    TypeEnum,     // enum
+    TypeMethod,   // method
+    TypeFn,       // Fn
+    TypeLambda,   // lambda
     TypeFunction, // function
     TypeNumber,   // number, num
     TypeUnknown,  // unknown
@@ -129,8 +127,8 @@ pub enum TokenKind {
     MinusAssign, // -=
     MulAssign,   // *=
     DivAssign,   // /=
-    DotDotDot,   // ...  //todo: add it
-    DotDot,      //..  //todo : add it
+    DotDotDot,   // ...
+    DotDot,      //..
     DashDot,     // -.
     Mod,         // %
     ModAssign,   // %=
@@ -149,8 +147,11 @@ pub enum TokenKind {
     GreaterEq, // >=
     LessEq,    // <=
 
-    Ampersand, // &
-    At,        // @
+    Ampersand,  // &
+    At,         // @
+    Caret,      // ^ (bitwise XOR or exponent)
+    ShiftLeft,  // <<
+    ShiftRight, // >>
 
     //not used yet
     Hash,       //#  we will use it in future update for hex and colors
@@ -221,12 +222,10 @@ impl TokenKind {
             TokenKind::Leave => "leave",
             TokenKind::Yield => "yield",
             TokenKind::Goto => "goto",
-            TokenKind::Call => "call",
             TokenKind::Label => "label",
             TokenKind::LabelName(v) => v,
             TokenKind::TemplateText(v) => v,
             TokenKind::TypeClass => "class",
-            TokenKind::TypeMicro => "micro",
             TokenKind::TypeMacro => "macro",
             TokenKind::TypeEnum => "enum",
             TokenKind::TypeLambda => "lambda",
@@ -272,6 +271,11 @@ impl TokenKind {
             TokenKind::And => "and",
             TokenKind::Or => "or",
             TokenKind::Pipe => "|",
+            TokenKind::Caret => "^",
+            TokenKind::ShiftLeft => "<<",
+            TokenKind::ShiftRight => ">>",
+            TokenKind::Hash => "#",
+            TokenKind::At => "@",
             TokenKind::Underscore => "_",
             TokenKind::Walrus => ":=",
             TokenKind::Undefined => "undefined",

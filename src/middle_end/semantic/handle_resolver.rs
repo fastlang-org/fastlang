@@ -1,4 +1,4 @@
-use crate::frontend::parser::ast::HandleMethods;
+use crate::frontend::parser::ast::{self, HandleMethods};
 use crate::middle_end::semantic::environment::{BlueprintData, Environment, FnSignature};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -95,7 +95,6 @@ pub enum HandleLookupResult {
     /// Operator is unknown
     UnknownOp,
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // build_blueprint_from_metadata
@@ -265,9 +264,7 @@ pub fn build_blueprint_from_base_type(
     bp
 }
 
-pub fn build_blueprint_from_metadata(
-    meta: &crate::frontend::parser::ast::TypeMetadata,
-) -> BlueprintData {
+pub fn build_blueprint_from_metadata(meta: &ast::TypeMetadata) -> BlueprintData {
     let mut bp = build_blueprint_from_base_type(&meta.ty);
     for h in &meta.handles {
         bp.handles.insert(*h);

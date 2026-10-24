@@ -231,12 +231,6 @@ pub enum SymbolKind {
         return_type: BaseType,
         body: Vec<Stmt>,
     },
-    /// Micro (micro)
-    Micro {
-        generics: Vec<BaseType>,
-        params: Vec<Param>,
-        body: Vec<Stmt>,
-    },
     /// blueprint definition (class, struct, custom, enum)
     Blueprint,
     /// label
@@ -306,13 +300,6 @@ impl SymbolInfo {
             } => {
                 let p_strs: Vec<String> = params.iter().map(|p| p.type_node.as_str()).collect();
                 format!("Macro<({}), {}>", p_strs.join(", "), return_type.as_str())
-            }
-            SymbolKind::Micro {
-                params,
-                ..
-            } => {
-                let p_strs: Vec<String> = params.iter().map(|p| p.type_node.as_str()).collect();
-                format!("Micro<({})>", p_strs.join(", "))
             }
             SymbolKind::Blueprint => "blueprint".to_string(),
             SymbolKind::Label => "label".to_string(),
@@ -446,14 +433,17 @@ impl Environment {
 
     pub fn define(&mut self, name: String, info: SymbolInfo) -> Result<(), String> {
         if let Some(existing) = self.symbols.get(&name) {
-            // If both existing and incoming symbols are functions or micros, allow overloading/updating
-            if (matches!(existing.kind, SymbolKind::Function { .. })
-                && matches!(info.kind, SymbolKind::Function { .. }))
-                || (matches!(existing.kind, SymbolKind::Micro { .. })
-                && matches!(info.kind, SymbolKind::Micro { .. }))
-                || (matches!(existing.kind, SymbolKind::Blueprint)
-                && matches!(info.kind, SymbolKind::Blueprint))
-            {
+            // Functions may always overload each other.
+            let both_fns = matches!(existing.kind, SymbolKind::Function { .. })
+                && matches!(info.kind, SymbolKind::Function { .. });
+            // Macros may always overload each other (different patterns/arities).
+            let both_macros = matches!(existing.kind, SymbolKind::Macro { .. })
+                && matches!(info.kind, SymbolKind::Macro { .. });
+            // Blueprints may be updated (e.g. via `impl`).
+            let both_blueprints = matches!(existing.kind, SymbolKind::Blueprint)
+                && matches!(info.kind, SymbolKind::Blueprint);
+
+            if both_fns || both_macros || both_blueprints {
                 self.symbols.insert(name, info);
                 return Ok(());
             }

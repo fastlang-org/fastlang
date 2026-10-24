@@ -10,6 +10,8 @@ double fast_pow(double base, double exp);
 double fast_sin(double x);
 double fast_cos(double x);
 double fast_tan(double x);
+double fast_floor(double x);
+double fast_ceil(double x);
 
 #ifdef __cplusplus
 }

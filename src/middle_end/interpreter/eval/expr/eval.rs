@@ -1,10 +1,11 @@
-use crate::frontend::parser::ast::*;
+use crate::frontend::parser::ast::{self, *};
 use crate::middle_end::interpreter::env::InterpreterEnv;
 use crate::middle_end::interpreter::eval::{
     expr_contains_this, is_known_type_name, is_literal, strip_type_wrapper,
 };
 use crate::middle_end::interpreter::intrinsics::CompilerIntrinsics;
 use crate::middle_end::interpreter::Interpreter;
+use crate::middle_end::semantic::analyzer::{detect_execution_mode, resolve_call_generics};
 
 impl Interpreter {
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Expr, String> {
@@ -345,6 +346,95 @@ impl Interpreter {
             } => {
                 if let Expr::PropertyAccess { object, property } = &**callee {
                     let obj_val = self.eval_expr(object).unwrap_or_else(|_| *object.clone());
+                    if property == "as_str" {
+                        if let Expr::LiteralString(ref s) = obj_val {
+                            let clean = s.strip_prefix("__toml_doc:").unwrap_or(s);
+                            return Ok(Expr::LiteralString(clean.to_string()));
+                        }
+                    }
+                    if property == "type" {
+                        let t = self.get_expr_type(&obj_val);
+                        return Ok(Expr::LiteralString(format!("type<{}>", t)));
+                    }
+                    if let Expr::LiteralString(ref s) = obj_val {
+                        if let Some(toml_content) = s.strip_prefix("__toml_doc:") {
+                            if property == "get_content" || property == "as_str" {
+                                return Ok(Expr::LiteralString(toml_content.to_string()));
+                            }
+                            if property == "select" {
+                                let sec = args.first().and_then(|a| {
+                                    match self.eval_expr(a).unwrap_or_else(|_| a.clone()) {
+                                        Expr::LiteralString(name) => Some(name),
+                                        _ => None,
+                                    }
+                                }).unwrap_or_default();
+                                let mut results = Vec::new();
+                                if let Ok(val) = toml_content.parse::<toml::Value>() {
+                                    if let Some(table) = val.get(&sec).and_then(|v| v.as_table()) {
+                                        for (k, v) in table {
+                                            let v_str = match v {
+                                                toml::Value::String(s) => format!("\"{}\"", s),
+                                                other => other.to_string(),
+                                            };
+                                            results.push(Expr::LiteralString(format!("{} = {}", k, v_str)));
+                                        }
+                                    }
+                                }
+                                if results.is_empty() {
+                                    let mut in_section = false;
+                                    for line in toml_content.lines() {
+                                        let trimmed = line.trim();
+                                        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                                            let s_name = &trimmed[1..trimmed.len() - 1].trim();
+                                            in_section = *s_name == sec || *s_name == format!("{}ies", sec) || (sec == "dependency" && *s_name == "dependencies");
+                                        } else if in_section && !trimmed.is_empty() && !trimmed.starts_with('#') {
+                                            results.push(Expr::LiteralString(trimmed.to_string()));
+                                        }
+                                    }
+                                }
+                                return Ok(Expr::ArrayLiteral(results));
+                            }
+                            if property == "insert" {
+                                let sec = args.first().and_then(|a| {
+                                    match self.eval_expr(a).unwrap_or_else(|_| a.clone()) {
+                                        Expr::LiteralString(name) => Some(name),
+                                        _ => None,
+                                    }
+                                }).unwrap_or_default();
+                                let items = args.get(1).map(|a| {
+                                    self.eval_expr(a).unwrap_or_else(|_| a.clone())
+                                });
+                                let mut new_lines = Vec::new();
+                                if let Some(Expr::ArrayLiteral(arr)) = items {
+                                    for item in arr {
+                                        if let Expr::LiteralString(s) = item {
+                                            new_lines.push(s);
+                                        }
+                                    }
+                                } else if let Some(Expr::LiteralString(s)) = items {
+                                    new_lines.push(s);
+                                }
+                                let mut updated = toml_content.to_string();
+                                let header = format!("[{}]", sec);
+                                if let Some(idx) = updated.find(&header) {
+                                    let insert_pos = idx + header.len();
+                                    let mut addition = String::new();
+                                    for l in new_lines {
+                                        addition.push('\n');
+                                        addition.push_str(&l);
+                                    }
+                                    updated.insert_str(insert_pos, &addition);
+                                } else {
+                                    updated.push_str(&format!("\n\n[{}]\n", sec));
+                                    for l in new_lines {
+                                        updated.push_str(&l);
+                                        updated.push('\n');
+                                    }
+                                }
+                                return Ok(Expr::LiteralString(format!("__toml_doc:{}", updated)));
+                            }
+                        }
+                    }
                     let type_name = match &obj_val {
                         Expr::LiteralString(s) => strip_type_wrapper(s).to_string(),
                         Expr::Identifier(id) => {
@@ -544,7 +634,7 @@ impl Interpreter {
                     let target_type = generics
                         .first()
                         .cloned()
-                        .unwrap_or(BaseType::Int(crate::frontend::parser::ast::Size::S32));
+                        .unwrap_or(BaseType::Int(ast::Size::S32));
                     if !CompilerIntrinsics::is_numeric_type(&target_type) {
                         return self.fastlang_throw(&format!(
                             "@compile::rand only supports numeric types, found '{}'",
@@ -556,6 +646,71 @@ impl Interpreter {
                         .map(|a| self.eval_expr(a).unwrap_or_else(|_| a.clone()))
                         .collect();
                     return self.fastlang_rand(&target_type, &evaled_args);
+                }
+
+                if target_fn_name == "@compile::create_ident" || target_fn_name == "create_ident" {
+                    if let Some(arg) = args.first() {
+                        let val = self.eval_expr(arg).unwrap_or_else(|_| arg.clone());
+                        if let Expr::LiteralString(s) = val {
+                            return Ok(Expr::Identifier(s));
+                        }
+                    }
+                    return Ok(expr.clone());
+                }
+
+                if target_fn_name == "@compile::open" {
+                    if let Some(arg) = args.first() {
+                        let val = self.eval_expr(arg).unwrap_or_else(|_| arg.clone());
+                        if let Expr::LiteralString(path) = val {
+                            let content = std::fs::read_to_string(&path).unwrap_or_default();
+                            return Ok(Expr::LiteralString(content));
+                        }
+                    }
+                    return Err("@compile::open requires string literal path".to_string());
+                }
+
+                if target_fn_name == "@compile::write" {
+                    if args.len() >= 2 {
+                        let p_val = self.eval_expr(&args[0]).unwrap_or_else(|_| args[0].clone());
+                        let c_val = self.eval_expr(&args[1]).unwrap_or_else(|_| args[1].clone());
+                        if let Expr::LiteralString(path) = p_val {
+                            let content_str = match c_val {
+                                Expr::LiteralString(s) => s.strip_prefix("__toml_doc:").unwrap_or(&s).to_string(),
+                                Expr::Identifier(id) => id,
+                                other => self.format_expr_for_print(&other),
+                            };
+                            let _ = std::fs::write(&path, content_str);
+                            return Ok(Expr::LiteralVoid);
+                        }
+                    }
+                    return Err("@compile::write requires string literal path and content".to_string());
+                }
+
+                if target_fn_name == "@compile::toml" {
+                    if let Some(arg) = args.first() {
+                        let val = self.eval_expr(arg).unwrap_or_else(|_| arg.clone());
+                        let content = match val {
+                            Expr::LiteralString(s) => s,
+                            other => self.format_expr_for_print(&other),
+                        };
+                        return Ok(Expr::LiteralString(format!("__toml_doc:{}", content)));
+                    }
+                    return Ok(Expr::LiteralString("__toml_doc:".to_string()));
+                }
+
+                if target_fn_name == "@compile::time" {
+                    return Ok(super::builtins::create_comptime_time_expr());
+                }
+
+                if target_fn_name == "@compile::get_toml" {
+                    if let Some(arg) = args.first() {
+                        let val = self.eval_expr(arg).unwrap_or_else(|_| arg.clone());
+                        if let Expr::LiteralString(path) = val {
+                            let content = std::fs::read_to_string(&path).unwrap_or_default();
+                            return Ok(Expr::LiteralString(format!("__toml_doc:{}", content)));
+                        }
+                    }
+                    return Ok(Expr::LiteralString("__toml_doc:".to_string()));
                 }
 
                 if target_fn_name == "@compile::access" || target_fn_name == "access" {
@@ -642,6 +797,7 @@ impl Interpreter {
                         env: InterpreterEnv::with_parent(self.env.clone()),
                         functions: self.functions.clone(),
                         micros: self.micros.clone(),
+                        macros: self.macros.clone(),
                         var_types: self.var_types.clone(),
                         current_env: self.current_env.clone(),
                         fn_overloads: self.fn_overloads.clone(),
@@ -667,8 +823,7 @@ impl Interpreter {
 
                 let is_compilable = target_fn_name.starts_with("@compile::") || {
                     if let Some((_, _, body)) = self.functions.get(&target_fn_name) {
-                        crate::middle_end::semantic::analyzer::detect_execution_mode(body)
-                            == ExecutionMode::FullyCompilable
+                        detect_execution_mode(body) == ExecutionMode::FullyCompilable
                     } else {
                         false
                     }
@@ -685,17 +840,13 @@ impl Interpreter {
                         let arg_types: Vec<String> =
                             eval_args.iter().map(|a| self.fastlang_typeof(a)).collect();
                         let generic_map =
-                            crate::middle_end::semantic::analyzer::resolve_call_generics(
-                                &fn_generics,
-                                &params,
-                                generics,
-                                &arg_types,
-                            );
+                            resolve_call_generics(&fn_generics, &params, generics, &arg_types);
 
                         let mut func_interp = Interpreter {
                             env: InterpreterEnv::with_parent(self.env.clone()),
                             functions: self.functions.clone(),
                             micros: self.micros.clone(),
+                        macros: self.macros.clone(),
                             var_types: self.var_types.clone(),
                             current_env: self.current_env.clone(),
                             fn_overloads: self.fn_overloads.clone(),

@@ -1,10 +1,10 @@
 // Test 91: Compile-time Validation Block
 import std::fmt;
-micro test_micro_in_compile = ()-> {
+macro test_micro_in_compile = ()-> {
     @compile::print("test_micro_in_compile");
 }
 fn test_validation() -> void {
-    int32 x = rand<int32>(-10, 0);
+    int32 x = rand<int32>(-10, 10);
     @compile {
         if (x < 0) {
         @compile::print("x is negative");
@@ -16,6 +16,6 @@ fn test_validation() -> void {
 }
 fn main() -> int32 {
     test_validation();
-    println("COMPILE VALIDATION PASSED");
+    println("COMPILE VALIDATION PASSED"); //EXPECT: COMPILE VALIDATION PASSED
     return 0;
 }

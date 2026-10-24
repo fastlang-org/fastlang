@@ -198,6 +198,9 @@ impl Parser {
                 allowed_handle.push(HandleMethods::Arrow);
                 allowed_handle.push(HandleMethods::ArrowAssign);
                 allowed_handle.push(HandleMethods::FatArrow);
+                allowed_handle.push(HandleMethods::ShiftLeft);
+                allowed_handle.push(HandleMethods::ShiftRight);
+                allowed_handle.push(HandleMethods::Caret);
 
                 allowed_handle.push(HandleMethods::Call);
 
@@ -220,7 +223,6 @@ impl Parser {
                 allowed_handle.push(HandleMethods::Deref);
                 allowed_handle.push(HandleMethods::Copy);
                 allowed_handle.push(HandleMethods::Cast);
-                allowed_handle.push(HandleMethods::Extension);
             }
             BaseType::Block { .. } => {
                 allowed_handle.push(HandleMethods::Display);

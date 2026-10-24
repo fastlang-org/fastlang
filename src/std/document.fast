@@ -1,0 +1,218 @@
+// FastLang Standard Library: Unified Document Architecture
+import std::types;
+import std::time;
+
+using types;
+using time;
+
+public blueprint DocumentPayload = {
+    char name[];
+    char content[];
+    Time created;
+    Time updated;
+}
+
+public impl DocumentPayload -> {
+    fn get_name() -> str {
+        return this.name;
+    }
+    fn set_name(n: str) -> void {
+        this.name = n;
+    }
+    fn get_content() -> str {
+        return this.content;
+    }
+    fn set_content(c: str) -> void {
+        this.content = c;
+    }
+    fn as_str() -> str {
+        return this.content;
+    }
+    fn len() -> usize {
+        return this.content.len;
+    }
+    handle -> {
+        fn display() -> str {
+            return this.content;
+        }
+    }
+}
+
+public enum Document : str {
+    ["html"] = Html(DocumentPayload),
+    ["json"] = Json(DocumentPayload),
+    ("raw")  = Raw(DocumentPayload),
+    ["toml"] = Toml(DocumentPayload),
+}
+
+public impl Document -> {
+    fn as_str() -> str {
+        match this {
+            Html(p) => return p.as_str(),
+            Json(p) => return p.as_str(),
+            Raw(p)  => return p.as_str(),
+            Toml(p) => return p.as_str(),
+        }
+        return "";
+    }
+    fn get_content() -> str {
+        return this.as_str();
+    }
+    fn get_name() -> str {
+        match this {
+            Html(p) => return p.get_name(),
+            Json(p) => return p.get_name(),
+            Raw(p)  => return p.get_name(),
+            Toml(p) => return p.get_name(),
+        }
+        return "";
+    }
+    fn get_payload() -> DocumentPayload {
+        match this {
+            Html(p) => return p,
+            Json(p) => return p,
+            Raw(p)  => return p,
+            Toml(p) => return p,
+        }
+        DocumentPayload dummy;
+        return dummy;
+    }
+    handle -> {
+        fn display() -> str {
+            return this.as_str();
+        }
+    }
+}
+
+public class HtmlDocument -> {
+    public -> {
+        char content[];
+        bool is_htmx;
+        fn render() -> str {
+            return this.content;
+        }
+        fn as_str() -> str {
+            return this.content;
+        }
+        fn get_content() -> str {
+            return this.content;
+        }
+        fn set_content(c: str) -> void {
+            this.content = c;
+        }
+        fn to_document(name: str := "index.html") -> Document {
+            DocumentPayload p;
+            p.name = name;
+            p.content = this.content;
+            p.created = Time::now();
+            p.updated = Time::now();
+            return Document::Html(p);
+        }
+    }
+    handle -> {
+        fn display() -> str {
+            return this.content;
+        }
+    }
+}
+
+public class JsonDocument -> {
+    public -> {
+        char content[];
+        bool is_htmx;
+        fn as_str() -> str {
+            return this.content;
+        }
+        fn get_content() -> str {
+            return this.content;
+        }
+        fn set_content(c: str) -> void {
+            this.content = c;
+        }
+        fn to_document(name: str := "data.json") -> Document {
+            DocumentPayload p;
+            p.name = name;
+            p.content = this.content;
+            p.created = Time::now();
+            p.updated = Time::now();
+            return Document::Json(p);
+        }
+    }
+    handle -> {
+        fn display() -> str {
+            return this.content;
+        }
+        fn index_access(key: str) -> str {
+            str c = this.content;
+            int32 c_len = c.len;
+            int32 k_len = key.len;
+            if (c_len == 0 || k_len == 0) {
+                return "";
+            }
+
+            int32 match_idx = -1;
+            for (int32 i = 0; i + k_len + 2 <= c_len; i = i + 1) {
+                if (c[i] == '"') {
+                    bool matched = true;
+                    for (int32 k = 0; k < k_len; k = k + 1) {
+                        if (c[i + 1 + k] != key[k]) {
+                            matched = false;
+                            break;
+                        }
+                    }
+                    if (matched && c[i + 1 + k_len] == '"') {
+                        match_idx = i + 2 + k_len;
+                        break;
+                    }
+                }
+            }
+
+            if (match_idx == -1) {
+                return "";
+            }
+
+            int32 pos = match_idx;
+            while (pos < c_len) {
+                char ch = c[pos];
+                if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == ':') {
+                    pos = pos + 1;
+                } else {
+                    break;
+                }
+            }
+
+            if (pos >= c_len) {
+                return "";
+            }
+
+            if (c[pos] == '"') {
+                pos = pos + 1;
+                int32 start = pos;
+                while (pos < c_len && c[pos] != '"') {
+                    pos = pos + 1;
+                }
+                int32 val_len = pos - start;
+                char res[] = new char[](val_len);
+                for (int32 j = 0; j < val_len; j = j + 1) {
+                    res[j] = c[start + j];
+                }
+                return res;
+            } else {
+                int32 start = pos;
+                while (pos < c_len) {
+                    char ch = c[pos];
+                    if (ch == ',' || ch == '}' || ch == ']' || ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+                        break;
+                    }
+                    pos = pos + 1;
+                }
+                int32 val_len = pos - start;
+                char res[] = new char[](val_len);
+                for (int32 j = 0; j < val_len; j = j + 1) {
+                    res[j] = c[start + j];
+                }
+                return res;
+            }
+        }
+    }
+}

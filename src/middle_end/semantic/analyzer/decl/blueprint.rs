@@ -65,6 +65,7 @@ impl SemanticAnalyzer {
         _is_handle_impl: bool,
         methods: &[Decl],
         handle_block: &[Decl],
+        static_block: &[Decl],
     ) -> Result<(), String> {
         let is_builtin = Self::is_primitive_numeric(target)
             || matches!(
@@ -122,7 +123,7 @@ impl SemanticAnalyzer {
         };
 
         if !is_target_class {
-            for m in methods.iter().chain(handle_block.iter()) {
+            for m in methods.iter().chain(static_block.iter()).chain(handle_block.iter()) {
                 if let Decl::FnDecl {
                     is_virtual: true, ..
                 } = m
@@ -196,7 +197,7 @@ impl SemanticAnalyzer {
             "greater_than_equal",
         ];
 
-        for h in methods.iter().chain(handle_block.iter()) {
+        for h in methods.iter().chain(static_block.iter()).chain(handle_block.iter()) {
             if let Decl::FnDecl {
                 name: h_name,
                 params,
@@ -337,7 +338,7 @@ impl SemanticAnalyzer {
             .borrow_mut()
             .define("this".to_string(), this_info);
 
-        for m in methods {
+        for m in methods.iter().chain(static_block.iter()) {
             self.visit_declaration(m)?;
             if let Decl::FnDecl {
                 name,

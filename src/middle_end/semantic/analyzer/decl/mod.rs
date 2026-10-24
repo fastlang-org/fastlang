@@ -171,16 +171,20 @@ impl SemanticAnalyzer {
                 )
             }
 
-            Decl::MicroDecl {
-                visibility,
-                name,
-                params,
-                return_type,
-                body,
-                generics,
-            } => {
-                self.visit_micro_decl(visibility, name, params, return_type, body, generics)
+            Decl::FnAliasDecl { name, target, .. } => {
+                self.fn_aliases.insert(name.clone(), target.clone());
+                if let Some(target_sigs) = self.fn_overloads.get(target).cloned() {
+                    let mut alias_sigs = Vec::new();
+                    for mut sig in target_sigs {
+                        sig.name = name.clone();
+                        alias_sigs.push(sig);
+                    }
+                    self.fn_overloads.insert(name.clone(), alias_sigs);
+                }
+                self.record_dependency(target.clone());
+                Ok(())
             }
+
 
             Decl::LabelDecl { name, body, .. } => {
                 self.visit_label_decl(name, body)
@@ -202,8 +206,9 @@ impl SemanticAnalyzer {
                 is_handle_impl,
                 methods,
                 handle_block,
+                static_block,
             } => {
-                self.visit_impl_decl(target, target_generics, *is_handle_impl, methods, handle_block)
+                self.visit_impl_decl(target, target_generics, *is_handle_impl, methods, handle_block, static_block)
             }
 
             Decl::ExternFnDecl {

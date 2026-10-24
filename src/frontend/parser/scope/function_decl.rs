@@ -25,6 +25,16 @@ impl Parser {
             return Err("Expected 'fn' or 'method'".to_string());
         }
         let name = self.get_identifier("Expected function name")?;
+        if self.peek().kind == TokenKind::Using {
+            self.advance();
+            let target = self.get_identifier("Expected target function name after 'using'")?;
+            self.consume(TokenKind::SemiColon, "Expected ';' after function alias declaration")?;
+            return Ok(Decl::FnAliasDecl {
+                visibility: Visibility::Public,
+                name,
+                target,
+            });
+        }
         let mut generics: Vec<BaseType> = Vec::new();
         if self.peek().kind == TokenKind::Less {
             self.parse_generics(&mut generics)?;
@@ -196,160 +206,4 @@ impl Parser {
         })
     }
 
-    pub(crate) fn parse_micro_decl(&mut self) -> Result<Decl, String> {
-        self.advance(); // consume 'micro'
-        let name = self.get_identifier("Expected micro name")?;
-
-        let mut generics = None;
-        if self.peek().kind == TokenKind::Less {
-            self.advance();
-            let mut gen_list = Vec::new();
-            while !self.is_at_end() && self.peek().kind != TokenKind::Greater {
-                gen_list.push(self.get_identifier("Expected generic parameter name")?);
-                if self.peek().kind == TokenKind::Comma {
-                    self.advance();
-                }
-            }
-            self.consume(TokenKind::Greater, "Expected '>' after generic parameters")?;
-            generics = Some(gen_list);
-        }
-
-        if self.peek().kind == TokenKind::Assign {
-            self.advance();
-        }
-
-        let mut params = Vec::new();
-        if self.peek().kind == TokenKind::LParen {
-            self.advance();
-            while !self.is_at_end() && self.peek().kind != TokenKind::RParen {
-                let p = self.parse_single_param()?;
-                params.push(p);
-                if self.peek().kind == TokenKind::Comma {
-                    self.advance();
-                }
-            }
-            self.consume(TokenKind::RParen, "Expected ')' after parameter list")?;
-        }
-
-        let mut return_type = None;
-        if self.peek().kind == TokenKind::Arrow {
-            self.advance();
-            if self.peek().kind != TokenKind::LBrace {
-                return_type = Some(self.parse_type()?);
-            }
-        }
-
-        let body = if self.peek().kind == TokenKind::LBrace {
-            self.advance();
-            let mut stmts = Vec::new();
-            while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
-                if let Some(stmt) = self.parse_statement(ScopeType::Block)? { stmts.push(stmt) }
-            }
-            self.consume(TokenKind::RBrace, "Expected '}' to close micro body")?;
-            stmts
-        } else {
-            match self.parse_statement(ScopeType::Block)? {
-                Some(stmt) => vec![stmt],
-                None => vec![],
-            }
-        };
-
-        if self.peek().kind == TokenKind::SemiColon {
-            self.advance();
-        }
-
-        Ok(Decl::MicroDecl {
-            visibility: Visibility::Private,
-            name,
-            generics,
-            params,
-            return_type,
-            body,
-        })
-    }
-
-    pub(crate) fn parse_macro_decl(&mut self) -> Result<Decl, String> {
-        self.advance(); // consume 'macro'
-
-        let name = self.get_handle_identifier("Expected macro name after 'macro'")?;
-        self.macro_metadata.insert(name.clone());
-
-        let mut generics: Vec<BaseType> = Vec::new();
-        if self.peek().kind == TokenKind::Less {
-            self.parse_generics(&mut generics)?;
-            for g in &generics {
-                if let BaseType::GenericParam(gen_name) = g {
-                    self.current_generics.insert(gen_name.clone());
-                }
-            }
-        }
-
-        let mut params = Vec::new();
-        if self.peek().kind == TokenKind::LBracket {
-            self.advance(); // consume '['
-            while !self.is_at_end() && self.peek().kind != TokenKind::RBracket {
-                let p = self.parse_single_param()?;
-                params.push(p);
-                if self.peek().kind == TokenKind::Comma {
-                    self.advance();
-                }
-            }
-            self.consume(TokenKind::RBracket, "Expected ']' after macro parameters")?;
-        } else if self.peek().kind == TokenKind::LParen {
-            self.advance(); // consume '('
-            while !self.is_at_end() && self.peek().kind != TokenKind::RParen {
-                let p = self.parse_single_param()?;
-                params.push(p);
-                if self.peek().kind == TokenKind::Comma {
-                    self.advance();
-                }
-            }
-            self.consume(TokenKind::RParen, "Expected ')' after parameter list")?;
-        }
-
-        if self.peek().kind == TokenKind::Arrow {
-            self.advance();
-        }
-
-        let body = if self.peek().kind == TokenKind::LBrace {
-            self.advance();
-            let mut stmts = Vec::new();
-            while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
-                let start_pos = self.current;
-                match self.parse_statement(ScopeType::Block)? {
-                    Some(stmt) => stmts.push(stmt),
-                    None => {
-                        if self.current == start_pos && !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
-                            self.advance();
-                        }
-                    }
-                }
-            }
-            self.consume(TokenKind::RBrace, "Expected '}' to close macro body")?;
-            stmts
-        } else {
-            match self.parse_statement(ScopeType::Block)? {
-                Some(stmt) => vec![stmt],
-                None => vec![],
-            }
-        };
-
-        if self.peek().kind == TokenKind::SemiColon {
-            self.advance();
-        }
-
-        for g in &generics {
-            if let BaseType::GenericParam(gen_name) = g {
-                self.current_generics.remove(gen_name);
-            }
-        }
-
-        Ok(Decl::MacroDecl {
-            visibility: Visibility::Private,
-            name,
-            generics,
-            params,
-            body,
-        })
-    }
 }

@@ -187,6 +187,16 @@ impl Parser {
                         idx += 1;
                         break;
                     }
+                } else if self.tokens[idx].kind == TokenKind::ShiftRight {
+                    if depth >= 2 {
+                        depth -= 2;
+                    } else {
+                        depth -= 1;
+                    }
+                    if depth == 0 {
+                        idx += 1;
+                        break;
+                    }
                 } else if matches!(
                     self.tokens[idx].kind,
                     TokenKind::SemiColon | TokenKind::Assign | TokenKind::Arrow | TokenKind::EOF
@@ -375,6 +385,8 @@ impl Parser {
         let rhs = self.parse_expression()?;
         if self.peek().kind == TokenKind::SemiColon {
             self.advance();
+        } else if self.peek().kind != TokenKind::RBrace && self.peek().kind != TokenKind::Comma {
+            return Err("Expected ';' after variable declaration".to_string());
         }
         Ok(Stmt::Declaration(Decl::ObjectDestructureDecl {
             visibility: Visibility::Private,
@@ -465,6 +477,8 @@ impl Parser {
         let rhs = self.parse_expression()?;
         if self.peek().kind == TokenKind::SemiColon {
             self.advance();
+        } else if self.peek().kind != TokenKind::RBrace && self.peek().kind != TokenKind::Comma {
+            return Err("Expected ';' after variable declaration".to_string());
         }
         Ok(Stmt::Declaration(Decl::ObjectDestructureDecl {
             visibility: Visibility::Private,
@@ -737,6 +751,8 @@ impl Parser {
 
         if self.peek().kind == TokenKind::SemiColon {
             self.advance();
+        } else if self.peek().kind != TokenKind::RBrace && self.peek().kind != TokenKind::Comma {
+            return Err("Expected ';' after variable declaration".to_string());
         }
 
         let visibility = if scope == ScopeType::Global {
