@@ -61,6 +61,8 @@ impl Interpreter {
     pub fn eval_stmt(&mut self, stmt: &Stmt) -> Result<Option<Expr>, String> {
         match stmt {
             Stmt::CompileValidation { body, args } => {
+                let old_compile_block = self.in_compile_block;
+                self.in_compile_block = true;
                 self.env.push_scope();
                 for (i, arg) in args.iter().enumerate() {
                     let val = self.eval_expr(arg).unwrap_or_else(|_| arg.clone());
@@ -88,6 +90,7 @@ impl Interpreter {
                 for (id, val) in writebacks {
                     let _ = self.env.assign(&id, val);
                 }
+                self.in_compile_block = old_compile_block;
                 res
             }
             Stmt::ForInStmt {
@@ -154,6 +157,11 @@ impl Interpreter {
                 self.env.define(name.clone(), val);
                 Ok(None)
             }
+            Stmt::Declaration(Decl::ArrayDecl { name, value, .. }) => {
+                let val = self.eval_expr(value)?;
+                self.env.define(name.clone(), val);
+                Ok(None)
+            }
             Stmt::ReassignStmt { target, value, op } => {
                 let val = self.eval_expr(value)?;
                 if let Expr::Identifier(name) = target {
@@ -164,7 +172,82 @@ impl Interpreter {
                             self.env.assign(name, res)?;
                         }
                     }
+                } else if let Expr::IndexAccess { object, indices } = target {
+                    if let Expr::Identifier(name) = &**object {
+                        if let Some(first_idx) = indices.first() {
+                            let idx_val = self.eval_expr(first_idx)?;
+                            if let Expr::LiteralInt(idx) = idx_val {
+                                if let Ok(Expr::ArrayLiteral(mut arr)) = self.env.get(name) {
+                                    let u_idx = idx.max(0) as usize;
+                                    while arr.len() <= u_idx {
+                                        arr.push(Expr::LiteralInt(0));
+                                    }
+                                    if op == "=" {
+                                        arr[u_idx] = val;
+                                    } else if let Some(res) = apply_reassign_op(&arr[u_idx], op, &val) {
+                                        arr[u_idx] = res;
+                                    }
+                                    self.env.assign(name, Expr::ArrayLiteral(arr))?;
+                                }
+                            }
+                        }
+                    }
                 }
+                Ok(None)
+            }
+            Stmt::ForStmt {
+                init,
+                condition,
+                increment,
+                body,
+            } => {
+                self.env.push_scope();
+                if let Some(init_stmt) = init {
+                    self.eval_stmt(init_stmt)?;
+                }
+                let mut iterations = 0;
+                while iterations < 100_000 {
+                    iterations += 1;
+                    if let Some(cond) = condition {
+                        let cond_val = self.eval_expr(cond)?;
+                        match cond_val {
+                            Expr::LiteralBool(b) => {
+                                if !b {
+                                    break;
+                                }
+                            }
+                            _ => break,
+                        }
+                    }
+                    let mut broken = false;
+                    match body {
+                        EitherBlock::Inline(stmts) => {
+                            for s in stmts {
+                                if matches!(s, Stmt::BreakStmt) {
+                                    broken = true;
+                                    break;
+                                }
+                                if matches!(s, Stmt::ContinueStmt) {
+                                    break;
+                                }
+                                if let Some(ret) = self.eval_stmt(s)? {
+                                    self.env.pop_scope();
+                                    return Ok(Some(ret));
+                                }
+                            }
+                        }
+                        EitherBlock::External(expr) => {
+                            self.eval_expr(expr)?;
+                        }
+                    }
+                    if broken {
+                        break;
+                    }
+                    if let Some(inc) = increment {
+                        self.eval_stmt(inc)?;
+                    }
+                }
+                self.env.pop_scope();
                 Ok(None)
             }
             Stmt::IfStmt {
@@ -344,8 +427,8 @@ impl Interpreter {
         for mut stmt in stmts.drain(..) {
             match &mut stmt {
                 Stmt::CompileValidation { body: _, args } => {
-                    if self.in_function_body {
-                        // Belongs to the containing function definition.
+                    if self.in_function_body && !args.is_empty() {
+                        // Belongs to the containing function definition and depends on parameters.
                         // Do NOT execute or strip at declaration time; callers will evaluate it on each call.
                         new_stmts.push(stmt);
                         continue;

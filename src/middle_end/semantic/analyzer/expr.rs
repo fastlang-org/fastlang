@@ -1192,9 +1192,8 @@ impl SemanticAnalyzer {
                         return Ok("void".to_string());
                     }
                     if name != "Some" && self.current_env.borrow().lookup(name).is_none() {
-                        let entity = if name.starts_with('@')
+                        let entity = if (name.starts_with('@') && !name.contains("::"))
                             || name.starts_with('$')
-                            || name.contains("::")
                         {
                             "Macro"
                         } else {

@@ -87,7 +87,20 @@ impl SemanticAnalyzer {
                             };
                             self.current_env
                                 .borrow_mut()
-                                .define_or_update(f_name, fn_info);
+                                .define_or_update(f_name.clone(), fn_info);
+
+                            let sig = FnSignature {
+                                name: f_name.clone(),
+                                generics: generics.clone(),
+                                params: params.clone(),
+                                return_type: return_type.clone(),
+                                is_virtual: false,
+                                is_abstract: false,
+                            };
+                            let entry = self.fn_overloads.entry(f_name.clone()).or_default();
+                            if !entry.iter().any(|s| s.params == sig.params && s.generics == sig.generics) {
+                                entry.push(sig);
+                            }
                         }
                         Decl::ImplDecl {
                             target,

@@ -6,26 +6,36 @@ import std::net;
 import std::http;
 import std::fmt;
 import std::io;
+import std::html;
 
 using http;
+using html;
 
 blueprint CounterComponent -> {
     int32 count = 0;
 }
 
 impl CounterComponent -> {
-    fn render() -> HtmlDocument {
+    fn render() -> Document {
         int32 c = this.count;
-        return @html {
+        Document template_doc = @html #{
             <div id="counter-card" style="background: #1e293b; padding: 32px; border-radius: 12px; border: 1px solid #334155; max-width: 420px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
-                <h2 style="color: #38bdf8; margin-top: 0;">Interactive HTMX Component 🚀</h2>
-                <p style="color: #94a3b8; font-size: 1.1rem;">Current Clicks: <span style="color: #f43f5e; font-weight: bold; font-size: 1.5rem;">@f{c}</span></p>
+                <h2 style="color: #38bdf8; margin-top: 0;">Interactive HTMX Component</h2>
+                <p style="color: #94a3b8; font-size: 1.1rem;">Current Clicks: <span style="color: #f43f5e; font-weight: bold; font-size: 1.5rem;">{{count}}</span></p>
                 <button hx-post="/increment" hx-target="#counter-card" hx-swap="outerHTML"
-                        style="background: #2563eb; hover:background: #1d4ed8; color: white; border: none; padding: 12px 28px; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer;">
-                    Increment Dynamic Counter ⚡
+                        style="background: #2563eb; color: white; border: none; padding: 12px 28px; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer;">
+                    Increment Dynamic Counter
                 </button>
             </div>
         };
+        HtmlNode card = html(template_doc.as_str());
+        card.set_slot("count", c as str);
+        DocumentPayload payload;
+        payload.name = ".html";
+        payload.content = card.render();
+        payload.created = Time::now();
+        payload.updated = Time::now();
+        return Document::Html(payload);
     }
     fn reset() -> void {
         this.count = 0;
@@ -40,9 +50,8 @@ fn main() -> void {
     // 1. Initial Page Route (GET /)
     app.get("/", fn _(req: HttpRequest, res: HttpResponse) -> void {
         println("--> GET / [Serving Full Layout with Embedded Component]");
-        //counter.reset();
-        HtmlDocument comp_view = counter.render();
-        res.send_html(@html {
+        Document comp_view = counter.render();
+        Document page_template = @html #{
             <!DOCTYPE html>
             <html lang="en">
             <head>
@@ -50,20 +59,28 @@ fn main() -> void {
                 <title>FastLang HTMX Reactive Server</title>
                 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
             </head>
-            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding-top: 60px; margin: 0;">
+            <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding-top: 60px; margin: 0;">
                 <h1 style="color: #f8fafc; font-size: 2.5rem; margin-bottom: 8px;">FastLang Server-Driven UI</h1>
                 <p style="color: #64748b; margin-bottom: 32px;">Zero client-side JS build step &bull; Native FastLang C++ Backend</p>
-                @f{comp_view}
+                {{comp_view}}
             </body>
             </html>
-        });
+        };
+        HtmlNode page = html(page_template.as_str());
+        page.set_slot("comp_view", comp_view.as_str());
+        DocumentPayload payload;
+        payload.name = ".html";
+        payload.content = page.render();
+        payload.created = Time::now();
+        payload.updated = Time::now();
+        res.send_html(Document::Html(payload));
     });
 
     // 2. Partial Component Route (POST /increment)
     app.post("/increment", fn _(req: HttpRequest, res: HttpResponse) -> void {
         counter.count = counter.count + 1;
         println("--> POST /increment [Dynamic HTMX Component Swap: new count=" + counter.count + "]");
-        HtmlDocument partial = counter.render();
+        Document partial = counter.render();
         res.send_component(partial);
     });
 

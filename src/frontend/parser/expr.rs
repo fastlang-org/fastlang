@@ -937,20 +937,6 @@ impl Parser {
                 }
             }
             TokenKind::LabelName(name) => {
-                if matches!(name.as_str(), "@html" | "@json" | "@safe" | "@raw")
-                    && self.peek_ahead(1).map(|t| &t.kind) == Some(&TokenKind::LBrace)
-                {
-                    let kind = match name.as_str() {
-                        "@html" => ForeignKind::Html,
-                        "@json" => ForeignKind::Json,
-                        "@safe" => ForeignKind::Safe,
-                        "@raw" => ForeignKind::Raw,
-                        _ => unreachable!(),
-                    };
-                    self.advance(); // consume label
-                    self.consume(TokenKind::LBrace, "Expected '{' to start foreign block")?;
-                    return self.parse_foreign_block(kind);
-                }
                 let val: String = name.clone();
                 self.advance();
                 Ok(Expr::Identifier(val))
@@ -1882,64 +1868,6 @@ impl Parser {
         })
     }
 
-    pub(crate) fn parse_foreign_block(&mut self, kind: ForeignKind) -> Result<Expr, String> {
-        let mut chunks = Vec::new();
-
-        while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
-            match self.peek().kind.clone() {
-                TokenKind::TemplateText(text) => {
-                    self.advance();
-                    chunks.push(ForeignChunk::Static(text));
-                }
-                TokenKind::LabelName(lbl) if lbl == "@f" => {
-                    self.advance(); // consume '@f'
-                    self.consume(TokenKind::LBrace, "Expected '{' after '@f'")?;
-
-                    let is_stmt = matches!(
-                        self.peek().kind,
-                        TokenKind::For
-                            | TokenKind::While
-                            | TokenKind::Do
-                            | TokenKind::Loop
-                            | TokenKind::Set
-                            | TokenKind::Del
-                    ) || self.is_var_decl_start();
-
-                    if is_stmt {
-                        let mut stmts = Vec::new();
-                        while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
-                            if let Some(s) = self.parse_statement(ScopeType::Block)? {
-                                stmts.push(s);
-                            }
-                        }
-                        self.consume(
-                            TokenKind::RBrace,
-                            "Expected '}' to close '@f' interpolation block",
-                        )?;
-                        chunks.push(ForeignChunk::Statements(stmts));
-                    } else {
-                        let expr = self.parse_expression()?;
-                        if self.peek().kind == TokenKind::SemiColon {
-                            self.advance();
-                        }
-                        self.consume(
-                            TokenKind::RBrace,
-                            "Expected '}' to close '@f' interpolation block",
-                        )?;
-                        chunks.push(ForeignChunk::Interpolation(Box::new(expr)));
-                    }
-                }
-                _ => {
-                    self.advance();
-                }
-            }
-        }
-
-        self.consume(TokenKind::RBrace, "Expected '}' to close foreign block")?;
-
-        Ok(Expr::ForeignBlock { kind, chunks })
-    }
-
     pub(crate) fn try_match_infix_macro(&mut self, lhs: Expr, min_bp: u8) -> Result<Option<Expr>, String> {
         let op_opt = MacroOperator::from_token_kind(&self.peek().kind);
         let Some(current_op) = op_opt else {
@@ -2035,45 +1963,55 @@ impl Parser {
                 let label_str = lbl.trim_start_matches('@').to_string();
                 self.advance();
 
-                let mut args = vec![Expr::LiteralString(label_str)];
+                let mut args = vec![Expr::LiteralString(label_str.clone())];
 
                 if let Some(MacroPatternItem::BlockParam { .. }) = pattern.get(1) {
                     let mut block_text = String::new();
-                    if self.peek().kind == TokenKind::Hash {
+                    if let TokenKind::TemplateText(text) = &self.peek().kind {
+                        block_text = text.clone();
                         self.advance();
-                    }
-                    if self.peek().kind == TokenKind::LBrace {
-                        self.advance();
-                        let mut depth = 1;
-                        while !self.is_at_end() && depth > 0 {
-                            if self.peek().kind == TokenKind::LBrace {
-                                depth += 1;
-                                block_text.push('{');
-                            } else if self.peek().kind == TokenKind::RBrace {
-                                depth -= 1;
-                                if depth == 0 {
-                                    self.advance();
-                                    break;
-                                }
-                                block_text.push('}');
-                            } else {
-                                let temp_str;
-                                let tok_str = match &self.peek().kind {
-                                    TokenKind::TemplateText(t) => t.as_str(),
-                                    other => {
-                                        temp_str = other.as_str();
-                                        &temp_str
-                                    }
-                                };
-                                if !block_text.is_empty() && !block_text.ends_with('\n') && !block_text.ends_with(' ') {
-                                    block_text.push(' ');
-                                }
-                                block_text.push_str(tok_str);
-                            }
+                    } else {
+                        if self.peek().kind == TokenKind::Hash {
                             self.advance();
                         }
+                        if self.peek().kind == TokenKind::LBrace {
+                            self.advance();
+                            let mut depth = 1;
+                            while !self.is_at_end() && depth > 0 {
+                                if self.peek().kind == TokenKind::LBrace {
+                                    depth += 1;
+                                    block_text.push('{');
+                                } else if self.peek().kind == TokenKind::RBrace {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        self.advance();
+                                        break;
+                                    }
+                                    block_text.push('}');
+                                } else {
+                                    let temp_str;
+                                    let tok_str = match &self.peek().kind {
+                                        TokenKind::TemplateText(t) => t.as_str(),
+                                        other => {
+                                            temp_str = other.as_str();
+                                            &temp_str
+                                        }
+                                    };
+                                    if !block_text.is_empty() && !block_text.ends_with('\n') && !block_text.ends_with(' ') {
+                                        block_text.push(' ');
+                                    }
+                                    block_text.push_str(tok_str);
+                                }
+                                self.advance();
+                            }
+                        }
                     }
-                    args.push(Expr::LiteralString(block_text.trim().to_string()));
+                    let final_text = if label_str == "html" {
+                        crate::backend::cpp::expr::transform_fastreact_html(&block_text)
+                    } else {
+                        block_text
+                    };
+                    args.push(Expr::LiteralString(final_text.trim().to_string()));
                 }
 
                 return Ok(Some(Expr::MacroCall {

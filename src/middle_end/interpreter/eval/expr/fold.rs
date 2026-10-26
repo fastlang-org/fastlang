@@ -256,6 +256,7 @@ impl Interpreter {
                                     fn_overloads: self.fn_overloads.clone(),
                                     split_functions: self.split_functions.clone(),
                                     in_function_body: true,
+                                    in_compile_block: true,
                                     current_switch_type: None,
                                     current_type: self.current_type.clone(),
                                     target_backend: self.target_backend.clone(),
@@ -751,6 +752,9 @@ impl Interpreter {
                             matches!(fn_name.as_str(), "create_ident")
                                 || fn_name.starts_with("@compile::")
                         }
+                        Expr::NamespaceAccess { namespace, .. } => {
+                            namespace == "@compile"
+                        }
                         _ => false,
                     };
                     if should_try_fold {
@@ -759,7 +763,10 @@ impl Interpreter {
                             generics: generics.clone(),
                             args: args.clone(),
                         };
-                        self.eval_expr(&temp_expr).ok()
+                        match self.eval_expr(&temp_expr) {
+                            Ok(res) => Some(res),
+                            Err(_) => None,
+                        }
                     } else {
                         None
                     }
@@ -904,6 +911,7 @@ impl Interpreter {
                         fn_overloads: self.fn_overloads.clone(),
                         split_functions: self.split_functions.clone(),
                         in_function_body: true,
+                        in_compile_block: self.in_compile_block,
                         current_switch_type: None,
                         current_type: self.current_type.clone(),
                         target_backend: self.target_backend.clone(),
@@ -1005,6 +1013,7 @@ impl Interpreter {
                                     fn_overloads: self.fn_overloads.clone(),
                                     split_functions: self.split_functions.clone(),
                                     in_function_body: true,
+                                    in_compile_block: true,
                                     current_switch_type: None,
                                     current_type: self.current_type.clone(),
                                     target_backend: self.target_backend.clone(),
@@ -1085,6 +1094,12 @@ impl Interpreter {
                     _ => false,
                 };
 
+                let is_explicit_compile = match &**callee {
+                    Expr::NamespaceAccess { namespace, .. } => namespace == "@compile",
+                    Expr::Identifier(id) => id.starts_with("@compile::"),
+                    _ => false,
+                };
+
                 if is_compilable {
                     match self.eval_expr(expr) {
                         Ok(res) => {
@@ -1100,7 +1115,7 @@ impl Interpreter {
                             }
                         }
                         Err(e) => {
-                            if e.contains("Compile Error") {
+                            if is_explicit_compile || e.contains("Compile Error") {
                                 return Err(e);
                             }
                         }
@@ -1128,6 +1143,18 @@ impl Interpreter {
                 } else {
                     self.fold_expr(then_branch)?;
                     self.fold_expr(else_branch)?;
+                }
+            }
+            Expr::Lambda { body, .. } => {
+                self.evaluate_ast(body)?;
+            }
+            Expr::BlockExpr {
+                statements,
+                final_expr,
+            } => {
+                self.evaluate_ast(statements)?;
+                if let Some(fe) = final_expr {
+                    self.fold_expr(fe)?;
                 }
             }
             _ => {}

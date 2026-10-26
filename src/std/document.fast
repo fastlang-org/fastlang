@@ -77,6 +77,9 @@ public impl Document -> {
         DocumentPayload dummy;
         return dummy;
     }
+    fn render() -> str {
+        return this.as_str();
+    }
     handle -> {
         fn display() -> str {
             return this.as_str();
@@ -216,3 +219,15 @@ public class JsonDocument -> {
         }
     }
 }
+
+public macro _ffi_scope_ @[scope_kind : str]#{inner : str} -> {
+    return in {
+        Document[scope_kind](DocumentPayload {
+            name = "." + scope_kind,
+            content = inner,
+            created = Time::now(),
+            updated = Time::now(),
+        });
+    };
+}
+

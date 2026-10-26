@@ -19,6 +19,68 @@ impl Interpreter {
             | Expr::LiteralVoid
             | Expr::LiteralUndefined => Ok(expr.clone()),
             Expr::Identifier(name) => self.env.get(name),
+            Expr::ArrayAllocate {
+                type_node,
+                size,
+                ..
+            } => {
+                let s_val = self.eval_expr(size)?;
+                let count = match s_val {
+                    Expr::LiteralInt(n) => n.max(0) as usize,
+                    Expr::LiteralUInt(n) => n as usize,
+                    _ => 0,
+                };
+                let resolved_type = match type_node {
+                    BaseType::GenericParam(n)
+                    | BaseType::Blueprint { name: n, .. }
+                    | BaseType::New(n) => {
+                        if let Some(Expr::LiteralString(s)) = self.env.get_ref(n) {
+                            let clean = if s.starts_with("type<") && s.ends_with('>') {
+                                &s[5..s.len() - 1]
+                            } else {
+                                s.as_str()
+                            };
+                            BaseType::from_str(clean)
+                        } else {
+                            type_node.clone()
+                        }
+                    }
+                    _ => type_node.clone(),
+                };
+                let default_elem = self
+                    .default_for_type(&resolved_type.as_str())
+                    .unwrap_or(Expr::LiteralInt(0));
+                let mut elements = Vec::with_capacity(count);
+                for _ in 0..count {
+                    elements.push(default_elem.clone());
+                }
+                Ok(Expr::ArrayLiteral(elements))
+            }
+            Expr::IndexAccess { object, indices } => {
+                let obj_val = self.eval_expr(object)?;
+                if let Expr::ArrayLiteral(elements) = obj_val {
+                    if let Some(first_idx) = indices.first() {
+                        let idx_val = self.eval_expr(first_idx)?;
+                        if let Expr::LiteralInt(idx) = idx_val {
+                            if idx >= 0 && (idx as usize) < elements.len() {
+                                return Ok(elements[idx as usize].clone());
+                            }
+                        }
+                    }
+                } else if let Expr::LiteralString(s) = obj_val {
+                    if let Some(first_idx) = indices.first() {
+                        let idx_val = self.eval_expr(first_idx)?;
+                        if let Expr::LiteralInt(idx) = idx_val {
+                            if idx >= 0 && (idx as usize) < s.len() {
+                                return Ok(Expr::LiteralChar(
+                                    s.chars().nth(idx as usize).unwrap_or('\0'),
+                                ));
+                            }
+                        }
+                    }
+                }
+                Ok(expr.clone())
+            }
             Expr::Cast { expr, target_type } => {
                 let val = self.eval_expr(expr)?;
                 let target_name = match target_type {
@@ -582,15 +644,15 @@ impl Interpreter {
                     Expr::NamespaceAccess {
                         namespace,
                         property,
-                    } if namespace == "@compile" => {
+                    } => {
                         if let Expr::Identifier(p) = &**property {
-                            format!("@compile::{}", p)
+                            format!("{}::{}", namespace, p)
                         } else {
-                            "".to_string()
+                            namespace.clone()
                         }
                     }
                     Expr::Identifier(id) => id.clone(),
-                    _ => "".to_string(),
+                    _ => self.format_expr_for_print(callee),
                 };
 
                 if target_fn_name == "@compile::typeof" || target_fn_name == "typeof" {
@@ -631,10 +693,24 @@ impl Interpreter {
                 }
 
                 if target_fn_name == "@compile::rand" || target_fn_name == "rand" {
-                    let target_type = generics
+                    let mut target_type = generics
                         .first()
                         .cloned()
                         .unwrap_or(BaseType::Int(ast::Size::S32));
+                    let g_name = match &target_type {
+                        BaseType::GenericParam(name)
+                        | BaseType::Blueprint { name, .. }
+                        | BaseType::New(name) => name.clone(),
+                        _ => target_type.as_str(),
+                    };
+                    if let Some(Expr::LiteralString(s)) = self.env.get_ref(&g_name) {
+                        let clean = if s.starts_with("type<") && s.ends_with('>') {
+                            &s[5..s.len() - 1]
+                        } else {
+                            s.as_str()
+                        };
+                        target_type = BaseType::from_str(clean);
+                    }
                     if !CompilerIntrinsics::is_numeric_type(&target_type) {
                         return self.fastlang_throw(&format!(
                             "@compile::rand only supports numeric types, found '{}'",
@@ -788,7 +864,12 @@ impl Interpreter {
                         ));
                     }
                 }
-                if let Some((params, body)) = self.micros.get(&target_fn_name).cloned() {
+                if let Some((params, body)) = self
+                    .micros
+                    .get(&target_fn_name)
+                    .cloned()
+                    .or_else(|| self.macros.get(&target_fn_name).and_then(|ov| ov.first().cloned()))
+                {
                     let mut eval_args = Vec::new();
                     for a in args {
                         eval_args.push(self.eval_expr(a).unwrap_or_else(|_| a.clone()));
@@ -803,6 +884,7 @@ impl Interpreter {
                         fn_overloads: self.fn_overloads.clone(),
                         split_functions: self.split_functions.clone(),
                         in_function_body: true,
+                        in_compile_block: self.in_compile_block,
                         current_switch_type: None,
                         current_type: self.current_type.clone(),
                         target_backend: self.target_backend.clone(),
@@ -821,18 +903,39 @@ impl Interpreter {
                     }
                 }
 
-                let is_compilable = target_fn_name.starts_with("@compile::") || {
-                    if let Some((_, _, body)) = self.functions.get(&target_fn_name) {
-                        detect_execution_mode(body) == ExecutionMode::FullyCompilable
-                    } else {
-                        false
-                    }
+                let (base_fn_name, extracted_generics) = if let Some(idx) = target_fn_name.find('<') {
+                    let base = target_fn_name[..idx].to_string();
+                    let end_idx = target_fn_name.rfind('>').unwrap_or(target_fn_name.len());
+                    let gen_str = &target_fn_name[idx + 1..end_idx];
+                    let parts: Vec<BaseType> = gen_str.split(',').map(|s| BaseType::from_str(s.trim())).collect();
+                    (base, parts)
+                } else {
+                    (target_fn_name.clone(), Vec::new())
+                };
+                let effective_generics = if generics.is_empty() {
+                    &extracted_generics
+                } else {
+                    generics
                 };
 
-                if is_compilable {
-                    if let Some((fn_generics, params, body)) =
-                        self.functions.get(&target_fn_name).cloned()
-                    {
+                let found_fn_decl = self
+                    .functions
+                    .get(&base_fn_name)
+                    .cloned()
+                    .or_else(|| self.functions.get(&target_fn_name).cloned());
+
+                let is_comptime_call = base_fn_name.starts_with("@compile::") || self.in_compile_block;
+                let can_eval = is_comptime_call
+                    || {
+                        if let Some((_, _, body)) = &found_fn_decl {
+                            detect_execution_mode(body) == ExecutionMode::FullyCompilable
+                        } else {
+                            false
+                        }
+                    };
+
+                if can_eval {
+                    if let Some((fn_generics, params, body)) = found_fn_decl {
                         let mut eval_args = Vec::new();
                         for a in args {
                             eval_args.push(self.eval_expr(a).unwrap_or_else(|_| a.clone()));
@@ -840,18 +943,19 @@ impl Interpreter {
                         let arg_types: Vec<String> =
                             eval_args.iter().map(|a| self.fastlang_typeof(a)).collect();
                         let generic_map =
-                            resolve_call_generics(&fn_generics, &params, generics, &arg_types);
+                            resolve_call_generics(&fn_generics, &params, effective_generics, &arg_types);
 
                         let mut func_interp = Interpreter {
                             env: InterpreterEnv::with_parent(self.env.clone()),
                             functions: self.functions.clone(),
                             micros: self.micros.clone(),
-                        macros: self.macros.clone(),
+                            macros: self.macros.clone(),
                             var_types: self.var_types.clone(),
                             current_env: self.current_env.clone(),
                             fn_overloads: self.fn_overloads.clone(),
                             split_functions: self.split_functions.clone(),
                             in_function_body: true,
+                            in_compile_block: is_comptime_call,
                             current_switch_type: None,
                             current_type: self.current_type.clone(),
                             target_backend: self.target_backend.clone(),
@@ -893,7 +997,17 @@ impl Interpreter {
                         } else {
                             return Ok(Expr::LiteralVoid);
                         }
+                    } else if is_comptime_call {
+                        return self.fastlang_throw(&format!(
+                            "Cannot call runtime or FFI function '{}' inside '@compile' block",
+                            target_fn_name
+                        ));
                     }
+                } else if is_comptime_call {
+                    return self.fastlang_throw(&format!(
+                        "Cannot call runtime or FFI function '{}' inside '@compile' block",
+                        target_fn_name
+                    ));
                 }
 
                 Ok(expr.clone())

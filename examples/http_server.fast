@@ -20,7 +20,7 @@ fn main() -> void {
 
     HttpServer server = new HttpServer(port);
 
-    HtmlDocument page = @html {
+    Document page = @html #{
         <!DOCTYPE html>
         <html>
         <head>

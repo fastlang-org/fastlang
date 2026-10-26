@@ -9,7 +9,6 @@ pub struct Scanner {
     template_stack: Vec<usize>,
     code_brace_stack: Vec<usize>,
     at_f_pending: bool,
-    template_tag_pending: bool,
 }
 
 impl Scanner {
@@ -41,7 +40,6 @@ impl Scanner {
             template_stack: Vec::new(),
             code_brace_stack: Vec::new(),
             at_f_pending: false,
-            template_tag_pending: false,
         }
     }
 
@@ -436,9 +434,6 @@ impl Scanner {
         }
 
         let c = self.advance().unwrap();
-        if c != '{' {
-            self.template_tag_pending = false;
-        }
 
         let kind = match c {
             'a'..='z' | 'A'..='Z' | '_' | '$' => {
@@ -478,9 +473,6 @@ impl Scanner {
                 if word.len() == 1 {
                     TokenKind::At
                 } else {
-                    if matches!(word.as_str(), "@html" | "@json" | "@safe" | "@raw") {
-                        self.template_tag_pending = true;
-                    }
                     TokenKind::LabelName(word.clone())
                 }
             }
@@ -743,11 +735,7 @@ impl Scanner {
                 }
             }
             '{' => {
-                if self.template_tag_pending {
-                    self.template_tag_pending = false;
-                    self.template_stack.push(1);
-                    self.in_template = true;
-                } else if self.at_f_pending {
+                if self.at_f_pending {
                     self.at_f_pending = false;
                     self.code_brace_stack.push(1);
                 } else if !self.code_brace_stack.is_empty() {

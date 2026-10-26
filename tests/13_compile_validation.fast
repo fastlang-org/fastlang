@@ -5,12 +5,14 @@ macro test_micro_in_compile = ()-> {
 }
 fn test_validation() -> void {
     int32 x = rand<int32>(-10, 10);
+    int32 arr[] = @compile::rand_range<int32>(10);
     @compile {
         if (x < 0) {
         @compile::print("x is negative");
         }else{
         @compile::print("x is ", x);
         }
+        @compile::print("arr is ", arr);
         test_micro_in_compile();
     }(x);
 }

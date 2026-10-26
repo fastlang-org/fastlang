@@ -1,0 +1,10 @@
+import std::fmt;
+fn test() -> void {
+  @compile {
+    println("test");
+  }();
+}
+fn main() -> int32 {
+    test();
+    return 0;
+}

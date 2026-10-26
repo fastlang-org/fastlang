@@ -187,15 +187,15 @@ public class WebAction -> {
     public -> {
         str target = "";
         str swap = "outerHTML";
-        HtmlDocument content = @html {};
+        Document content = @html #{};
 
         fn render() -> str {
-            return this.content.render();
+            return this.content.as_str();
         }
     }
 }
 
-public fn action(target: str, swap: str, content: HtmlDocument) -> WebAction {
+public fn action(target: str, swap: str, content: Document) -> WebAction {
     WebAction act = new WebAction();
     act.target = target;
     act.swap = swap;
@@ -203,12 +203,20 @@ public fn action(target: str, swap: str, content: HtmlDocument) -> WebAction {
     return act;
 }
 
-public fn action(target: str, content: HtmlDocument) -> WebAction {
+public fn action(target: str, content: Document) -> WebAction {
     WebAction act = new WebAction();
     act.target = target;
     act.swap = "outerHTML";
     act.content = content;
     return act;
+}
+
+public fn action(target: str, swap: str, content: HtmlDocument) -> WebAction {
+    return action(target, swap, content.to_document());
+}
+
+public fn action(target: str, content: HtmlDocument) -> WebAction {
+    return action(target, content.to_document());
 }
 
 public class HttpResponse -> {
@@ -243,12 +251,24 @@ public class HttpResponse -> {
             this.send(_inject_fastreact_script(doc.render()), "text/html; charset=utf-8");
         }
 
+        fn send_html(doc: Document) -> void {
+            this.send_doc(doc);
+        }
+
         fn send_page(doc: HtmlDocument) -> void {
             this.send(_inject_fastreact_script(doc.render()), "text/html; charset=utf-8");
         }
 
+        fn send_page(doc: Document) -> void {
+            this.send(_inject_fastreact_script(doc.as_str()), "text/html; charset=utf-8");
+        }
+
         fn send_component(comp: HtmlDocument) -> void {
             this.send(comp.render(), "text/html; charset=utf-8");
+        }
+
+        fn send_component(comp: Document) -> void {
+            this.send(comp.as_str(), "text/html; charset=utf-8");
         }
 
         fn send_action(act: WebAction) -> void {
@@ -269,7 +289,8 @@ public class HttpResponse -> {
             }
         }
 
-        fn send_json(doc: JsonDocument) -> void {
+
+        fn send_json(doc: Document) -> void {
             this.send(doc.as_str(), "application/json");
         }
 

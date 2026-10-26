@@ -3189,3 +3189,78 @@ w := X {
     y = 20;
 };
 c := @compile::access(w, x); 
+
+// we will add a way to define a ffi objects and fn through Document
+// so we will allow to use it like this
+c := @c #{
+    typedef struct {
+        int x;
+        int y;
+    } X;
+    int add(X a, X b) {
+        return a.x + b.x;
+    }
+};
+extern @c(c) :: {
+    struct X {
+        int x;
+        int y;
+    };
+    fn add(X, X) -> int32;
+};
+
+// for making alias objects
+set str == char[];
+sturct Dog {
+    str name;
+    int32 age;
+};
+struct Cat {
+    str name;
+    int32 age;
+};
+set Dog == Cat;
+// Cat and Dog have the same fields then they are equal in (fields) and (fields only)
+// that will allow us to impl for a one type of them and will be added to the other
+// that will allow us to impl the Cat and Dog in the same block
+impl Cat, Dog {
+    fn print() -> void {
+        println(this.name, " is ", this.age, " years old");
+    }
+};
+Cat c = Cat {
+    name = "cat";
+    age = 10;
+};
+Dog d = Dog {
+    name = "dog";
+    age = 10;
+};
+c.print(); // cat is 10 years old
+d.print(); // dog is 10 years old
+// that will fix some problems and make it easier and faster
+//todo: fix at compile methods and fns 
+//! detect_execution_mode() : donnot work as expected
+//! it is not working at all
+
+// ==========================================
+// ROADMAP & COMPILER ARCHITECTURE TODOs
+// ==========================================
+// 1. Compiler Warning & Dead Code Cleanup:
+//    - Clean up temporary `#[allow(dead_code)]` attributes and unused underscore suppressions across compiler passes.
+//    - Eliminate all compiler warning noise so builds are 100% clean.
+//
+// 2. detect_execution_mode Overhaul:
+//    - Architectural refactoring of detect_execution_mode to cleanly distinguish between:
+//      * FullyCompilable (pure compile-time only)
+//      * DualMode (pure FastLang functions callable both at comptime and emitted for runtime)
+//      * Mixed (contains static comptime branches/validations alongside runtime logic)
+//      * RuntimeOnly (calls FFI/external C functions/system calls)
+//
+// 3. Web Compiler & Full DOM Stack:
+//    - Advance src/std/html.fast to become a complete, robust HTML compiler supporting complex templates, large bodies, and full validation.
+//    - Implement dedicated mini-parsers for CSS (src/std/css.fast) and JS (src/std/js.fast) following the html.fast slot & AST pattern.
+//
+// 4. FastReact Framework Automation:
+//    - Build an interrupter / micro-parser for FastReact to automatically handle slot injection and reactive DOM updates without manual boilerplate.
+//    - Core Philosophy: Fastest execution, least development effort, and minimum lines of code.
