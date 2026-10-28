@@ -407,11 +407,6 @@ impl Parser {
     //TODO: fix this or remove it and build a better system for it
     pub(crate) fn parse_expression_or_reassignment(&mut self) -> Result<Stmt, String> {
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
-            if name == "let" {
-                self.advance();
-                return self.parse_var_decl(ScopeType::Block).map(Stmt::Declaration);
-            }
-
             let next1 = self.tokens.get(self.current + 1).map(|t| &t.kind);
             let next2 = self.tokens.get(self.current + 2).map(|t| &t.kind);
 

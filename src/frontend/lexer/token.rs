@@ -159,11 +159,13 @@ pub enum TokenKind {
     Tilde,      //~
 
     // Symbols
-    LParen,      // (
-    RParen,      // )
-    LBrace,      // {
-    RBrace,      // }
-    LBracket,    // [
+    LParen,       // (
+    RParen,       // )
+    LBrace,       // {
+    RBrace,       // }
+    DoubleLBrace, // {{
+    DoubleRBrace, // }}
+    LBracket,     // [
     RBracket,    // ]
     Colon,       // :
     DoubleColon, // ::
@@ -258,6 +260,8 @@ impl TokenKind {
             TokenKind::ModAssign => "%=",
             TokenKind::LBrace => "{",
             TokenKind::RBrace => "}",
+            TokenKind::DoubleLBrace => "{{",
+            TokenKind::DoubleRBrace => "}}",
             TokenKind::LBracket => "[",
             TokenKind::RBracket => "]",
             TokenKind::LParen => "(",

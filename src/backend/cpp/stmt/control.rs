@@ -30,6 +30,11 @@ impl CodeGenerator {
 
     pub(crate) fn visit_statement(&mut self, stmt: &Stmt) {
         match stmt {
+            Stmt::Splice(stmts) => {
+                for s in stmts {
+                    self.visit_statement(s);
+                }
+            }
             Stmt::Block(stmts) | Stmt::ThisBlock(stmts) => {
                 for s in stmts {
                     self.visit_statement(s);
@@ -46,6 +51,16 @@ impl CodeGenerator {
                             return;
                         }
                     }
+                }
+                if let Expr::InPlaceBlock { body } = expr {
+                    self.emit("{");
+                    self.indent_level += 1;
+                    for s in body {
+                        self.visit_statement(s);
+                    }
+                    self.indent_level -= 1;
+                    self.emit("}");
+                    return;
                 }
                 let code = self.visit_expression(expr);
                 self.emit(&format!("{};", code));
@@ -345,9 +360,7 @@ impl CodeGenerator {
                                                     if let Some(arg_type) = generic_args.get(i) {
                                                         self.vars
                                                             .insert(vn.clone(), arg_type.clone());
-                                                        if arg_type.ends_with('*')
-                                                            || arg_type.starts_with("raw_ptr<")
-                                                        {
+                                                        if arg_type.ends_with('*') {
                                                             self.raw_pointer_vars
                                                                 .insert(vn.clone());
                                                         }
@@ -421,9 +434,7 @@ impl CodeGenerator {
                                                                 vn.clone(),
                                                                 arg_type.clone(),
                                                             );
-                                                            if arg_type.ends_with('*')
-                                                                || arg_type.starts_with("raw_ptr<")
-                                                            {
+                                                            if arg_type.ends_with('*') {
                                                                 self.raw_pointer_vars
                                                                     .insert(vn.clone());
                                                             }
@@ -634,10 +645,8 @@ impl CodeGenerator {
                         Expr::Identifier(name) => self.raw_pointer_vars.contains(name),
                         _ => false,
                     };
-                    let is_ptr = is_raw_ptr
-                        || target_type
-                            .as_deref()
-                            .is_some_and(|t| t.ends_with('*') || t.starts_with("raw_ptr"));
+                    let is_ptr =
+                        is_raw_ptr || target_type.as_deref().is_some_and(|t| t.ends_with('*'));
                     let is_arr = target_type
                         .as_deref()
                         .is_some_and(|t| t.contains("array") || t.ends_with("[]"));

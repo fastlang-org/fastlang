@@ -1,4 +1,4 @@
-use crate::frontend::lexer::token::TokenKind;
+use crate::frontend::lexer::token::{Token, TokenKind};
 use crate::frontend::parser::ast::*;
 use crate::frontend::parser::parser::Parser;
 
@@ -507,7 +507,18 @@ impl Parser {
     pub(crate) fn parse_block(&mut self, _scope: String) -> Result<Vec<Stmt>, String> {
         let mut stmts: Vec<Stmt> = Vec::new();
         while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
+            if self.inplace_block_depth == 0 && self.peek().kind == TokenKind::DoubleRBrace {
+                let tok = self.peek();
+                let line = tok.line;
+                let col = tok.column;
+                self.tokens[self.current].kind = TokenKind::RBrace;
+                self.tokens.insert(self.current + 1, Token::new(TokenKind::RBrace, line, col + 1));
+                break;
+            }
             match self.parse_statement(ScopeType::Block) {
+                Ok(Some(Stmt::Splice(list))) => {
+                    stmts.extend(list);
+                }
                 Ok(Some(stmt)) => {
                     if self.peek().kind == TokenKind::RBrace
                         && !matches!(_scope.as_str(), "loop" | "while" | "do" | "for" | "for-in" | "object")

@@ -264,12 +264,19 @@ impl CodeGenerator {
                 let indices_code: Vec<String> =
                     indices.iter().map(|i| self.visit_expression(i)).collect();
                 if self.enum_types.contains(&obj_code) && indices_code.len() == 1 {
-                    let variants = self.enum_variant_defs.get(&obj_code).cloned().unwrap_or_default();
-                    let has_str_disc = variants.iter().any(|v| {
-                        matches!(&v.discriminant, Some(Expr::LiteralString(_)))
-                    });
+                    let variants = self
+                        .enum_variant_defs
+                        .get(&obj_code)
+                        .cloned()
+                        .unwrap_or_default();
+                    let has_str_disc = variants
+                        .iter()
+                        .any(|v| matches!(&v.discriminant, Some(Expr::LiteralString(_))));
                     if has_str_disc {
-                        let default_var = variants.iter().find(|v| v.is_default).or_else(|| variants.last());
+                        let default_var = variants
+                            .iter()
+                            .find(|v| v.is_default)
+                            .or_else(|| variants.last());
                         let mut branches = Vec::new();
                         for v in &variants {
                             if let Some(Expr::LiteralString(s)) = &v.discriminant {
@@ -304,7 +311,10 @@ impl CodeGenerator {
                     } else if self.simple_enum_types.contains(&obj_code) {
                         return format!("static_cast<{}>({})", obj_code, indices_code[0]);
                     } else if self.payload_enum_types.contains(&obj_code) {
-                        return format!("{}(static_cast<{}::Tag>({}))", obj_code, obj_code, indices_code[0]);
+                        return format!(
+                            "{}(static_cast<{}::Tag>({}))",
+                            obj_code, obj_code, indices_code[0]
+                        );
                     }
                 }
                 if indices_code.len() > 1 {
@@ -346,12 +356,20 @@ impl CodeGenerator {
             } => {
                 if let Expr::IndexAccess { object, indices } = &**callee {
                     let obj_code = self.visit_expression(object);
-                    if (self.enum_types.contains(&obj_code) || self.payload_enum_types.contains(&obj_code))
+                    if (self.enum_types.contains(&obj_code)
+                        || self.payload_enum_types.contains(&obj_code))
                         && indices.len() == 1
                     {
                         let idx_code = self.visit_expression(&indices[0]);
-                        let variants = self.enum_variant_defs.get(&obj_code).cloned().unwrap_or_default();
-                        let default_var = variants.iter().find(|v| v.is_default).or_else(|| variants.last());
+                        let variants = self
+                            .enum_variant_defs
+                            .get(&obj_code)
+                            .cloned()
+                            .unwrap_or_default();
+                        let default_var = variants
+                            .iter()
+                            .find(|v| v.is_default)
+                            .or_else(|| variants.last());
 
                         let mut arg_evals = Vec::new();
                         let mut arg_names = Vec::new();
@@ -363,9 +381,9 @@ impl CodeGenerator {
                         }
                         let args_forward = arg_names.join(", ");
 
-                        let has_str_disc = variants.iter().any(|v| {
-                            matches!(&v.discriminant, Some(Expr::LiteralString(_)))
-                        });
+                        let has_str_disc = variants
+                            .iter()
+                            .any(|v| matches!(&v.discriminant, Some(Expr::LiteralString(_))));
 
                         let mut branches = Vec::new();
                         for v in &variants {
@@ -485,6 +503,83 @@ impl CodeGenerator {
                                 property,
                                 all_args.join(", ")
                             );
+                        }
+                    }
+
+                    // UFCS dispatch: if `property` is not a member of `object`, but is a free function
+                    let clean_obj_ty = self
+                        .extract_cpp_type_from_expr(object)
+                        .map(|t| Self::clean_type_name(&t))
+                        .unwrap_or_default();
+                    let is_member = if clean_obj_ty.is_empty() {
+                        false
+                    } else {
+                        self.type_own_members
+                            .get(&clean_obj_ty)
+                            .is_some_and(|m| m.contains(property))
+                            || self
+                                .struct_field_types
+                                .get(&clean_obj_ty)
+                                .is_some_and(|f| f.contains_key(property))
+                    };
+                    let obj_code_preview = self.visit_expression(object);
+                    let is_this_or_super = obj_code_preview == "this"
+                        || obj_code_preview == "super"
+                        || obj_code_preview == "::"
+                        || self.enum_types.contains(&obj_code_preview);
+                    let is_free_fn = self.forward_declared_fns.contains(property)
+                        || self.fn_return_types.contains_key(property);
+
+                    let mut is_compatible_first_arg = false;
+                    let mut is_first_arg_pointer = false;
+                    if let Some(overloads) = self.fn_param_types.get(property) {
+                        for pts in overloads {
+                            if let Some(first_pt) = pts.first() {
+                                let clean_pt = Self::clean_type_name(first_pt);
+                                if clean_obj_ty.is_empty()
+                                    || clean_pt == clean_obj_ty
+                                    || (clean_pt.contains("int") && clean_obj_ty.contains("int"))
+                                    || (clean_pt.contains("float") && clean_obj_ty.contains("float"))
+                                    || (clean_pt == "double" && (clean_obj_ty == "double" || clean_obj_ty.contains("float")))
+                                    || clean_pt == "auto"
+                                    || clean_pt == "any"
+                                {
+                                    is_compatible_first_arg = true;
+                                    if first_pt.ends_with('*') {
+                                        is_first_arg_pointer = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    } else if is_free_fn {
+                        is_compatible_first_arg = true;
+                    }
+
+                    if !is_member && !is_this_or_super && is_free_fn && is_compatible_first_arg {
+                        let mut first_arg = obj_code_preview;
+                        if is_first_arg_pointer
+                            && !first_arg.starts_with('&')
+                            && !self.raw_pointer_vars.contains(&first_arg)
+                            && !self.pointer_vars.contains(&first_arg)
+                        {
+                            first_arg = format!("&{}", first_arg);
+                        }
+                        let mut all_args = vec![first_arg];
+                        for arg in args {
+                            all_args.push(self.visit_expression(arg));
+                        }
+                        let safe_prop = cpp_safe_name(property);
+                        if !generics.is_empty() {
+                            let gen_strs: Vec<String> = generics.iter().map(type_to_cpp).collect();
+                            return format!(
+                                "{}<{}>({})",
+                                safe_prop,
+                                gen_strs.join(", "),
+                                all_args.join(", ")
+                            );
+                        } else {
+                            return format!("{}({})", safe_prop, all_args.join(", "));
                         }
                     }
                 }
@@ -922,7 +1017,35 @@ impl CodeGenerator {
                     args.iter().map(|a| self.visit_expression(a)).collect();
                 let safe_handle = cpp_safe_name(handle_name);
 
-                if handle_name == "as_str" && args.is_empty() {
+                if (handle_name == "display" || handle_name == "as_str") && args.is_empty() {
+                    let cpp_t = self.extract_cpp_type_from_expr(object).unwrap_or_default();
+                    if cpp_t == "char*" || cpp_t == "const char*" || cpp_t == "str" {
+                        return obj_code;
+                    }
+                    if self.raw_pointer_vars.contains(&obj_code) {
+                        return format!("{}->display()", obj_code);
+                    }
+                    if !cpp_t.is_empty()
+                        && !matches!(
+                            cpp_t.as_str(),
+                            "int"
+                                | "int32_t"
+                                | "int64_t"
+                                | "int16_t"
+                                | "int8_t"
+                                | "uint32_t"
+                                | "uint64_t"
+                                | "size_t"
+                                | "uint16_t"
+                                | "uint8_t"
+                                | "float"
+                                | "double"
+                                | "bool"
+                                | "char"
+                        )
+                    {
+                        return format!("{}.display()", obj_code);
+                    }
                     return format!("fastlang_as_str({})", obj_code);
                 }
                 if handle_name == "copy" && args.is_empty() {
@@ -1049,6 +1172,22 @@ impl CodeGenerator {
                 let base_indent = "    ".repeat(self.indent_level);
                 format!("([&]() {{\n{}{}}}())", body_code, base_indent)
             }
+            Expr::InPlaceBlock { body } => {
+                let old_out = take(&mut self.output);
+                let old_indent = self.indent_level;
+                self.indent_level += 1;
+
+                for s in body {
+                    self.visit_statement(s);
+                }
+
+                let body_code = take(&mut self.output);
+                self.indent_level = old_indent;
+                self.output = old_out;
+
+                let base_indent = "    ".repeat(self.indent_level);
+                format!("([&]() {{\n{}{}}}())", body_code, base_indent)
+            }
             Expr::QuestionMark(inner) => {
                 let inner_code = self.visit_expression(inner);
                 let base_indent = "    ".repeat(self.indent_level);
@@ -1090,11 +1229,11 @@ impl CodeGenerator {
                             let expr_code = self.visit_expression(expr);
                             if prev_ended_with_equal {
                                 self.emit("__append(\"\\\"\");");
-                                self.emit(&format!("__append(fastlang_as_str({}));", expr_code));
+                                self.emit(&format!("__append({});", expr_code));
                                 self.emit("__append(\"\\\"\");");
                                 prev_ended_with_equal = false;
                             } else {
-                                self.emit(&format!("__append(fastlang_as_str({}));", expr_code));
+                                self.emit(&format!("__append({});", expr_code));
                             }
                         }
                         ForeignChunk::Statements(stmts) => {
@@ -1171,11 +1310,14 @@ impl CodeGenerator {
                         || property == "reverse"
                     {
                         self.extract_cpp_type_from_expr(object)
-                    } else if property == "as_str" || property == "to_str" || property == "display" {
+                    } else if property == "as_str" || property == "to_str" || property == "display"
+                    {
                         Some("fast_std::array<char>".to_string())
                     } else {
                         None
                     }
+                } else if let Expr::Identifier(fn_name) = &**callee {
+                    self.fn_return_types.get(fn_name).cloned()
                 } else {
                     None
                 }
@@ -1208,6 +1350,7 @@ impl CodeGenerator {
                         }
                     }
                 }
+
                 None
             }
             Expr::LiteralString(_) => Some("char*".to_string()),
@@ -1262,7 +1405,7 @@ impl CodeGenerator {
             Expr::ForeignBlock { kind, .. } => match kind {
                 ForeignKind::Html => Some("fast_std::HtmlDocument".to_string()),
                 ForeignKind::Json => Some("fast_std::JsonDocument".to_string()),
-                ForeignKind::Safe | ForeignKind::Raw => Some("array<char>".to_string()),
+                ForeignKind::Safe | ForeignKind::Raw => Some("str".to_string()),
             },
             _ => None,
         }

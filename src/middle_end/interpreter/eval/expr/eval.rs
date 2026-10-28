@@ -144,6 +144,14 @@ impl Interpreter {
                 self.env.pop_scope();
                 res
             }
+            Expr::InPlaceBlock { body } => {
+                self.env.push_scope();
+                for stmt in body {
+                    let _ = self.eval_stmt(stmt)?;
+                }
+                self.env.pop_scope();
+                Ok(Expr::LiteralVoid)
+            }
             Expr::PropertyAccess { object, property } => {
                 let obj_val = self.eval_expr(object).unwrap_or_else(|_| *object.clone());
                 let type_name = match &obj_val {

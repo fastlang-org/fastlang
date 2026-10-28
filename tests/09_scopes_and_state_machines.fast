@@ -107,7 +107,47 @@ machine StepperMachine -> {
     }
 }
 
+fn test_inplace_blocks() {
+    // 1. Standalone in-place block
+    {{
+        int32 z = 100;
+        println("Standalone in-place block: ", z);
+    }};
+
+    // 2. Case 1: Declaration initialized first, block executes after, x is in scope
+    int32 x = 10 {{
+        int32 y = 20;
+        println("InPlace Case 1: ", x + y);
+    }};
+    println("InPlace Case 1 post: ", x);
+
+    // 3. Case 2: Declaration uninitialized, block executes, then assignment
+    int32 a = {{
+        println("InPlace Case 2 block");
+    }} 42;
+    println("InPlace Case 2 post: ", a);
+
+    // 4. Case 3: Block executes first, then declaration
+    int32 {{
+        println("InPlace Case 3 block");
+    }} b = 55;
+    println("InPlace Case 3 post: ", b);
+
+    // 5. Case 4: Block executes first, then declaration
+    int32 c {{
+        println("InPlace Case 4 block");
+    }} = 77;
+    println("InPlace Case 4 post: ", c);
+
+    // 6. Walrus in-place block
+    w := 15 {{
+        println("InPlace Walrus: ", w + 5);
+    }};
+    println("InPlace Walrus post: ", w);
+}
+
 fn main() -> int32 {
+    test_inplace_blocks();
     int32 result = CounterMachine();
     println("Final Machine Count: ", result); // EXPECT: Final Machine Count: 5
 

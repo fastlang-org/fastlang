@@ -24,6 +24,7 @@ pub struct Parser {
     pub(crate) type_aliases: HashMap<String, BaseType>,
     pub(crate) in_match_pattern: bool,
     pub(crate) macro_patterns: Vec<Decl>,
+    pub(crate) inplace_block_depth: usize,
 }
 
 impl Parser {
@@ -66,6 +67,7 @@ impl Parser {
             type_aliases,
             in_match_pattern: false,
             macro_patterns: Vec::new(),
+            inplace_block_depth: 0,
         }
     }
 
@@ -119,6 +121,12 @@ impl Parser {
         while !self.is_at_end() {
             let prev_cur = self.current;
             match self.parse_statement(ScopeType::Global) {
+                Ok(Some(Stmt::Splice(list))) => {
+                    if self.current == prev_cur {
+                        panic!("Parser infinite loop: parse_statement returned Ok(Some) without advancing at token {:?}", self.peek());
+                    }
+                    statements.extend(list);
+                }
                 Ok(Some(stmt)) => {
                     if self.current == prev_cur {
                         panic!("Parser infinite loop: parse_statement returned Ok(Some) without advancing at token {:?}", self.peek());
@@ -158,6 +166,22 @@ impl Parser {
             let col = tok.column;
             self.tokens[self.current].kind = TokenKind::Greater;
             self.tokens.insert(self.current + 1, Token::new(TokenKind::Greater, line, col + 1));
+            Ok(self.advance())
+        } else if expected == TokenKind::LBrace && self.peek().kind == TokenKind::DoubleLBrace {
+            // Split `{{` into `{` followed by `{`
+            let tok = self.peek();
+            let line = tok.line;
+            let col = tok.column;
+            self.tokens[self.current].kind = TokenKind::LBrace;
+            self.tokens.insert(self.current + 1, Token::new(TokenKind::LBrace, line, col + 1));
+            Ok(self.advance())
+        } else if expected == TokenKind::RBrace && self.peek().kind == TokenKind::DoubleRBrace {
+            // Split `}}` into `}` followed by `}`
+            let tok = self.peek();
+            let line = tok.line;
+            let col = tok.column;
+            self.tokens[self.current].kind = TokenKind::RBrace;
+            self.tokens.insert(self.current + 1, Token::new(TokenKind::RBrace, line, col + 1));
             Ok(self.advance())
         } else {
             // Future location for line-based diagnostics and hints

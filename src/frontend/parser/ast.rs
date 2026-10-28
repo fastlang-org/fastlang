@@ -1678,6 +1678,9 @@ pub enum Expr {
         statements: Vec<Stmt>,
         final_expr: Option<Box<Expr>>,
     },
+    InPlaceBlock {
+        body: Vec<Stmt>,
+    },
     ForeignBlock {
         kind: ForeignKind,
         chunks: Vec<ForeignChunk>,
@@ -1810,6 +1813,7 @@ impl Expr {
                 let f = final_expr.as_ref().map(|e| e.as_str()).unwrap_or_default();
                 format!("{{ ...; {} }}", f)
             }
+            Expr::InPlaceBlock { .. } => "{{ ... }}".to_string(),
             Expr::ForeignBlock { kind, .. } => format!("{:?}Block", kind),
             Expr::QuestionMark(inner) => format!("{}?", inner.as_str()),
             _ => unreachable!(),
@@ -2187,6 +2191,7 @@ pub struct CatchClause {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
+    Splice(Vec<Stmt>),
     Declaration(Decl),
     Block(Vec<Stmt>),
     ThisBlock(Vec<Stmt>),

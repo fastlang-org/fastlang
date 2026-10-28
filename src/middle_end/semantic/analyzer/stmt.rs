@@ -3,6 +3,12 @@ use super::*;
 impl SemanticAnalyzer {
     pub(crate) fn visit_statement(&mut self, stmt: &Stmt) -> Result<(), String> {
         match stmt {
+            Stmt::Splice(stmts) => {
+                for s in stmts {
+                    self.visit_statement(s)?;
+                }
+            }
+
             Stmt::Block(stmts) | Stmt::ThisBlock(stmts) => {
                 self.enter_scope();
                 for s in stmts {

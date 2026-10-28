@@ -139,6 +139,16 @@ fn test_str_and_ustr_casting() -> void {
     println("str as ustr: ", as_unicode); // EXPECT: str as ustr: FastLang
 }
 
+fn test_string_interpolation() -> void {
+    int32 count = 42;
+    str name = "hakeem";
+    str s = "Hello {{ name }}, count is {{ count }}!";
+    println("Interpolated: ", s); // EXPECT: Interpolated: Hello hakeem, count is 42!
+
+    str t = #{ Value: {{ count + 8 }} };
+    println("Template: ", t); // EXPECT: Template:  Value: 50
+}
+
 fn main() -> int32 {
     test_str_operations();
     test_char_methods();
@@ -149,6 +159,7 @@ fn main() -> int32 {
     test_unicode_strings();
     test_unicode_concatenation();
     test_str_and_ustr_casting();
+    test_string_interpolation();
     println("ALL 05_STR_AND_PRIMITIVES TESTS PASSED"); // EXPECT: ALL 05_STR_AND_PRIMITIVES TESTS PASSED
     return 0;
 }

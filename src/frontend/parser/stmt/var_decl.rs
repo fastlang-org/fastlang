@@ -9,65 +9,9 @@ pub enum RhsValue {
 }
 
 impl Parser {
-    pub(crate) fn parse_const(&mut self, scope: ScopeType) -> Result<Decl, String> {
-        self.advance(); // consume 'const'
-
-        let mut decl = match &self.peek().kind {
-            TokenKind::TypeInt(_)
-            | TokenKind::TypeUInt(_)
-            | TokenKind::TypeUSize
-            | TokenKind::TypeISize
-            | TokenKind::TypeFloat(_)
-            | TokenKind::TypeChar
-            | TokenKind::TypeUChar
-            | TokenKind::TypeStr
-            | TokenKind::TypeUStr
-            | TokenKind::TypeBool
-            | TokenKind::TypeType
-            | TokenKind::Identifier(_) => self.parse_var_decl(scope)?,
-            _ => {
-                return Err("Syntax Error: Expected variable declaration".to_string());
-            }
-        };
-
-        match &mut decl {
-            Decl::VarDecl {
-                ref mut editability,
-                ..
-            } => {
-                *editability = Editability::NotEditable;
-            }
-            Decl::DestructureDecl {
-                ref mut editability,
-                ..
-            } => {
-                *editability = Editability::NotEditable;
-            }
-            Decl::ArrayDecl {
-                ref mut editability,
-                ..
-            } => {
-                *editability = Editability::NotEditable;
-            }
-            _ => {
-                return Err("Syntax Error: Only variables can be declared as const".to_string());
-            }
-        }
-
-        Ok(decl)
-    }
-
-    pub(crate) fn consume_optional_let(&mut self) {
-        if let TokenKind::Identifier(name) = &self.peek().kind {
-            if name == "let" {
-                self.advance();
-            }
-        }
-    }
-
     pub(crate) fn is_var_decl_start(&self) -> bool {
         match &self.peek().kind {
-            | TokenKind::Const
+            TokenKind::Const
             | TokenKind::TypeInt(_)
             | TokenKind::TypeUInt(_)
             | TokenKind::TypeUSize
@@ -93,13 +37,32 @@ impl Parser {
                 }
                 true
             }
-            | TokenKind::TypeFn
-            | TokenKind::TypeLambda
-            | TokenKind::TypeAuto => true,
+            TokenKind::TypeFn | TokenKind::TypeLambda | TokenKind::TypeAuto => true,
             TokenKind::Identifier(_) => {
                 if let Some(next) = self.tokens.get(self.current + 1) {
                     if next.kind == TokenKind::Walrus {
                         return true;
+                    }
+                    if next.kind == TokenKind::DoubleLBrace {
+                        let mut idx = self.current + 2;
+                        let mut depth = 1;
+                        while idx < self.tokens.len() && depth > 0 {
+                            if matches!(
+                                self.tokens[idx].kind,
+                                TokenKind::DoubleLBrace | TokenKind::LBrace
+                            ) {
+                                depth += 1;
+                            } else if matches!(
+                                self.tokens[idx].kind,
+                                TokenKind::DoubleRBrace | TokenKind::RBrace
+                            ) {
+                                depth -= 1;
+                            }
+                            idx += 1;
+                        }
+                        if idx < self.tokens.len() && self.tokens[idx].kind == TokenKind::Walrus {
+                            return true;
+                        }
                     }
                 }
                 self.is_custom_type_var_decl_start_at(self.current)
@@ -133,16 +96,42 @@ impl Parser {
         if idx >= self.tokens.len() {
             return false;
         }
-        if matches!(&self.tokens[idx].kind, TokenKind::Ampersand | TokenKind::Multiply) {
+        if matches!(
+            &self.tokens[idx].kind,
+            TokenKind::Ampersand | TokenKind::Multiply
+        ) {
             while idx < self.tokens.len()
-                && matches!(&self.tokens[idx].kind, TokenKind::Ampersand | TokenKind::Multiply)
+                && matches!(
+                    &self.tokens[idx].kind,
+                    TokenKind::Ampersand | TokenKind::Multiply
+                )
             {
                 idx += 1;
             }
-            if idx < self.tokens.len() && matches!(&self.tokens[idx].kind, TokenKind::Identifier(_)) {
+            if idx < self.tokens.len() && matches!(&self.tokens[idx].kind, TokenKind::Identifier(_))
+            {
                 return true;
             }
             return false;
+        }
+
+        if idx < self.tokens.len() && self.tokens[idx].kind == TokenKind::DoubleLBrace {
+            let mut depth = 1;
+            idx += 1;
+            while idx < self.tokens.len() && depth > 0 {
+                if matches!(
+                    self.tokens[idx].kind,
+                    TokenKind::DoubleLBrace | TokenKind::LBrace
+                ) {
+                    depth += 1;
+                } else if matches!(
+                    self.tokens[idx].kind,
+                    TokenKind::DoubleRBrace | TokenKind::RBrace
+                ) {
+                    depth -= 1;
+                }
+                idx += 1;
+            }
         }
 
         if matches!(&self.tokens[idx].kind, TokenKind::Identifier(_)) {
@@ -164,12 +153,20 @@ impl Parser {
                     p_depth -= 1;
                     if p_depth == 0 {
                         let next = self.tokens.get(p_idx + 1).map(|t| &t.kind);
-                        if matches!(next, Some(TokenKind::Assign) | Some(TokenKind::Arrow) | Some(TokenKind::Comma)) {
+                        if matches!(
+                            next,
+                            Some(TokenKind::Assign)
+                                | Some(TokenKind::Arrow)
+                                | Some(TokenKind::Comma)
+                        ) {
                             return true;
                         }
                         break;
                     }
-                } else if matches!(self.tokens[p_idx].kind, TokenKind::SemiColon | TokenKind::EOF) {
+                } else if matches!(
+                    self.tokens[p_idx].kind,
+                    TokenKind::SemiColon | TokenKind::EOF
+                ) {
                     break;
                 }
                 p_idx += 1;
@@ -221,12 +218,20 @@ impl Parser {
                         p_depth -= 1;
                         if p_depth == 0 {
                             let next = self.tokens.get(p_idx + 1).map(|t| &t.kind);
-                            if matches!(next, Some(TokenKind::Assign) | Some(TokenKind::Arrow) | Some(TokenKind::Comma)) {
+                            if matches!(
+                                next,
+                                Some(TokenKind::Assign)
+                                    | Some(TokenKind::Arrow)
+                                    | Some(TokenKind::Comma)
+                            ) {
                                 return true;
                             }
                             break;
                         }
-                    } else if matches!(self.tokens[p_idx].kind, TokenKind::SemiColon | TokenKind::EOF) {
+                    } else if matches!(
+                        self.tokens[p_idx].kind,
+                        TokenKind::SemiColon | TokenKind::EOF
+                    ) {
                         break;
                     }
                     p_idx += 1;
@@ -490,9 +495,8 @@ impl Parser {
     }
 
     pub(crate) fn parse_for_init_stmt(&mut self) -> Result<Stmt, String> {
-        self.consume_optional_let();
         if self.is_var_decl_start() {
-            self.parse_var_decl(ScopeType::Block).map(Stmt::Declaration)
+            self.parse_var_decl_statement(ScopeType::Block)
         } else {
             self.parse_expression_stmt()
         }
@@ -642,6 +646,453 @@ impl Parser {
             Ok(RhsValue::Group(list))
         } else {
             Ok(first)
+        }
+    }
+
+    pub(crate) fn parse_var_decl_statement(&mut self, scope: ScopeType) -> Result<Stmt, String> {
+        self.parse_var_decl_statement_with_const(scope, false)
+    }
+
+    pub(crate) fn parse_var_decl_statement_with_const(
+        &mut self,
+        scope: ScopeType,
+        mut is_const: bool,
+    ) -> Result<Stmt, String> {
+        if !is_const && self.peek().kind == TokenKind::Const {
+            self.advance();
+            is_const = true;
+        }
+
+        // 1. Walrus := declarations:
+        if let TokenKind::Identifier(_) = &self.peek().kind {
+            let mut is_walrus = false;
+            let mut walrus_post_name = false;
+            if let Some(t1) = self.tokens.get(self.current + 1) {
+                if t1.kind == TokenKind::Walrus {
+                    is_walrus = true;
+                } else if t1.kind == TokenKind::DoubleLBrace {
+                    let mut idx = self.current + 2;
+                    let mut depth = 1;
+                    while idx < self.tokens.len() && depth > 0 {
+                        if matches!(
+                            self.tokens[idx].kind,
+                            TokenKind::DoubleLBrace | TokenKind::LBrace
+                        ) {
+                            depth += 1;
+                        } else if matches!(
+                            self.tokens[idx].kind,
+                            TokenKind::DoubleRBrace | TokenKind::RBrace
+                        ) {
+                            depth -= 1;
+                        }
+                        idx += 1;
+                    }
+                    if idx < self.tokens.len() && self.tokens[idx].kind == TokenKind::Walrus {
+                        is_walrus = true;
+                        walrus_post_name = true;
+                    }
+                }
+            }
+
+            if is_walrus {
+                let name = self.get_identifier("Expected variable name")?;
+                let post_name_block =
+                    if walrus_post_name && self.peek().kind == TokenKind::DoubleLBrace {
+                        Some(self.parse_inplace_block()?)
+                    } else {
+                        None
+                    };
+                self.consume(TokenKind::Walrus, "Expected ':=' after variable name")?;
+                let pre_val_block = if self.peek().kind == TokenKind::DoubleLBrace {
+                    Some(self.parse_inplace_block()?)
+                } else {
+                    None
+                };
+                let val = self.parse_expression()?;
+                let post_val_block = if self.peek().kind == TokenKind::DoubleLBrace {
+                    Some(self.parse_inplace_block()?)
+                } else {
+                    None
+                };
+                if self.peek().kind == TokenKind::SemiColon {
+                    self.advance();
+                }
+
+                let visibility = if scope == ScopeType::Global {
+                    Visibility::Public
+                } else {
+                    Visibility::Private
+                };
+                let editability = if is_const {
+                    Editability::NotEditable
+                } else {
+                    Editability::Editable
+                };
+                let var_meta = VarMetadata {
+                    name: name.clone(),
+                    type_node: BaseType::Unknown,
+                    visibility: visibility.clone(),
+                    editability: editability.clone(),
+                    scope: scope.clone(),
+                    is_array: false,
+                };
+                self.var_metadata.insert(name.clone(), var_meta);
+
+                let has_blocks = post_name_block.is_some()
+                    || pre_val_block.is_some()
+                    || post_val_block.is_some();
+                if !has_blocks {
+                    return Ok(Stmt::Declaration(Decl::VarDecl {
+                        visibility,
+                        editability,
+                        type_node: BaseType::Unknown,
+                        place: Place::Local,
+                        name,
+                        assign_op: ":=".to_string(),
+                        value: val,
+                    }));
+                }
+
+                let mut spliced = Vec::new();
+                if let Some(b) = post_name_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                if let Some(b) = pre_val_block {
+                    spliced.push(Stmt::Declaration(Decl::VarDecl {
+                        visibility: visibility.clone(),
+                        editability: editability.clone(),
+                        type_node: BaseType::Unknown,
+                        place: Place::Local,
+                        name: name.clone(),
+                        assign_op: ":=".to_string(),
+                        value: Expr::Default(None),
+                    }));
+                    spliced.push(Stmt::ExpressionStmt(b));
+                    spliced.push(Stmt::ReassignStmt {
+                        target: Expr::Identifier(name.clone()),
+                        op: ":=".to_string(),
+                        value: val,
+                    });
+                } else {
+                    spliced.push(Stmt::Declaration(Decl::VarDecl {
+                        visibility,
+                        editability,
+                        type_node: BaseType::Unknown,
+                        place: Place::Local,
+                        name,
+                        assign_op: ":=".to_string(),
+                        value: val,
+                    }));
+                }
+                if let Some(b) = post_val_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                return Ok(Stmt::Splice(spliced));
+            }
+        }
+
+        // 2. Standard typed variable declaration:
+        let type_name = self.parse_type()?;
+        // Case 3: int {{ ... }} x = 10;
+        let pre_name_block = if self.peek().kind == TokenKind::DoubleLBrace {
+            Some(self.parse_inplace_block()?)
+        } else {
+            None
+        };
+
+        let pattern = self.parse_destructuring_pattern()?;
+        // Case 4: int x {{ ... }} = 10;
+        let post_name_block = if self.peek().kind == TokenKind::DoubleLBrace {
+            Some(self.parse_inplace_block()?)
+        } else {
+            None
+        };
+
+        let mut is_arr = false;
+        let mut array_sizes = Vec::new();
+        if let Pattern::Identifier(_) = &pattern {
+            while self.peek().kind == TokenKind::LBracket {
+                is_arr = true;
+                self.advance();
+                let size = if self.peek().kind != TokenKind::RBracket {
+                    Some(self.parse_expression()?)
+                } else {
+                    None
+                };
+                self.consume(TokenKind::RBracket, "Expected ']' after array size")?;
+                array_sizes.push(size);
+            }
+        }
+
+        let mut assign_op = String::new();
+        let mut pre_val_block = None;
+        let mut rhs_opt = None;
+        if self.peek().kind == TokenKind::Assign || self.peek().kind == TokenKind::Arrow {
+            assign_op = self.peek().kind.clone().as_str().to_string();
+            self.advance();
+            // Case 2: int x = {{ ... }} 10;
+            if self.peek().kind == TokenKind::DoubleLBrace {
+                pre_val_block = Some(self.parse_inplace_block()?);
+            }
+            rhs_opt = Some(self.parse_rhs_values()?);
+        }
+
+        // Case 1: int x = 10 {{ ... }};
+        let post_val_block = if self.peek().kind == TokenKind::DoubleLBrace {
+            Some(self.parse_inplace_block()?)
+        } else {
+            None
+        };
+
+        if self.peek().kind == TokenKind::SemiColon {
+            self.advance();
+        } else if self.peek().kind != TokenKind::RBrace && self.peek().kind != TokenKind::Comma {
+            return Err("Expected ';' after variable declaration".to_string());
+        }
+
+        let visibility = if scope == ScopeType::Global {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        };
+        let editability = if is_const {
+            Editability::NotEditable
+        } else {
+            Editability::Editable
+        };
+
+        match pattern {
+            Pattern::Identifier(ref name) if !is_arr => {
+                let val = match rhs_opt {
+                    Some(RhsValue::Single(expr)) => expr,
+                    Some(RhsValue::Group(items)) => {
+                        let mut elems = Vec::new();
+                        for item in items {
+                            match item {
+                                RhsValue::Single(e) => elems.push(e),
+                                RhsValue::Group(_) => {
+                                    let mut sub = Vec::new();
+                                    flatten_rhs(&item, &mut sub);
+                                    elems.push(Expr::ArrayLiteral(sub));
+                                }
+                            }
+                        }
+                        Expr::ArrayLiteral(elems)
+                    }
+                    None => Expr::Default(None),
+                };
+
+                let var_meta = VarMetadata {
+                    name: name.clone(),
+                    type_node: type_name.clone(),
+                    visibility: visibility.clone(),
+                    editability: editability.clone(),
+                    scope: scope.clone(),
+                    is_array: false,
+                };
+                self.var_metadata.insert(name.clone(), var_meta);
+
+                let place = if matches!(val, Expr::New { .. }) {
+                    Place::Heap
+                } else {
+                    Place::Local
+                };
+
+                let has_blocks = pre_name_block.is_some()
+                    || post_name_block.is_some()
+                    || pre_val_block.is_some()
+                    || post_val_block.is_some();
+
+                if !has_blocks {
+                    return Ok(Stmt::Declaration(Decl::VarDecl {
+                        visibility,
+                        editability,
+                        type_node: type_name,
+                        place,
+                        assign_op,
+                        name: name.clone(),
+                        value: val,
+                    }));
+                }
+
+                let mut spliced = Vec::new();
+                if let Some(b) = pre_name_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                if let Some(b) = post_name_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+
+                if let Some(b) = pre_val_block {
+                    spliced.push(Stmt::Declaration(Decl::VarDecl {
+                        visibility: visibility.clone(),
+                        editability: editability.clone(),
+                        type_node: type_name.clone(),
+                        place,
+                        assign_op: assign_op.clone(),
+                        name: name.clone(),
+                        value: Expr::Default(None),
+                    }));
+                    spliced.push(Stmt::ExpressionStmt(b));
+                    spliced.push(Stmt::ReassignStmt {
+                        target: Expr::Identifier(name.clone()),
+                        op: if assign_op.is_empty() {
+                            "=".to_string()
+                        } else {
+                            assign_op
+                        },
+                        value: val,
+                    });
+                } else {
+                    spliced.push(Stmt::Declaration(Decl::VarDecl {
+                        visibility,
+                        editability,
+                        type_node: type_name,
+                        place,
+                        assign_op,
+                        name: name.clone(),
+                        value: val,
+                    }));
+                }
+
+                if let Some(b) = post_val_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+
+                Ok(Stmt::Splice(spliced))
+            }
+            Pattern::Identifier(ref name) if is_arr => {
+                let val = match rhs_opt {
+                    Some(RhsValue::Single(expr)) => expr,
+                    Some(RhsValue::Group(items)) => {
+                        let mut elems = Vec::new();
+                        for item in items {
+                            match item {
+                                RhsValue::Single(e) => elems.push(e),
+                                RhsValue::Group(_) => {
+                                    let mut sub = Vec::new();
+                                    flatten_rhs(&item, &mut sub);
+                                    elems.push(Expr::ArrayLiteral(sub));
+                                }
+                            }
+                        }
+                        Expr::ArrayLiteral(elems)
+                    }
+                    None => Expr::Default(None),
+                };
+
+                let elem_type = if array_sizes.len() > 1 {
+                    let mut t = type_name.clone();
+                    for size in array_sizes.iter().skip(1).rev() {
+                        t = BaseType::Array {
+                            base_type: Box::new(t),
+                            size: Box::new(size.clone()),
+                        };
+                    }
+                    t
+                } else {
+                    type_name.clone()
+                };
+
+                let var_meta = VarMetadata {
+                    name: name.clone(),
+                    type_node: elem_type.clone(),
+                    visibility: visibility.clone(),
+                    editability: editability.clone(),
+                    scope,
+                    is_array: true,
+                };
+                self.var_metadata.insert(name.clone(), var_meta);
+
+                let len_expr = array_sizes
+                    .first()
+                    .cloned()
+                    .flatten()
+                    .unwrap_or(Expr::LiteralInt(0));
+
+                let decl = Decl::ArrayDecl {
+                    visibility,
+                    editability,
+                    type_node: elem_type,
+                    name: name.clone(),
+                    assign_op,
+                    length: len_expr,
+                    value: val,
+                };
+
+                let has_blocks = pre_name_block.is_some()
+                    || post_name_block.is_some()
+                    || post_val_block.is_some();
+                if !has_blocks {
+                    return Ok(Stmt::Declaration(decl));
+                }
+
+                let mut spliced = Vec::new();
+                if let Some(b) = pre_name_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                if let Some(b) = post_name_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                spliced.push(Stmt::Declaration(decl));
+                if let Some(b) = post_val_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                Ok(Stmt::Splice(spliced))
+            }
+            _ => {
+                let mut assignments = Vec::new();
+                if let Some(rhs) = rhs_opt {
+                    match_destructure(&pattern, &rhs, &mut assignments)?;
+                } else {
+                    let mut names = Vec::new();
+                    collect_pattern_identifiers(&pattern, &mut names);
+                    for n in names {
+                        assignments.push((n, Expr::Default(None)));
+                    }
+                }
+
+                for (name, _) in &assignments {
+                    let var_meta = VarMetadata {
+                        name: name.clone(),
+                        type_node: type_name.clone(),
+                        visibility: visibility.clone(),
+                        editability: editability.clone(),
+                        scope: scope.clone(),
+                        is_array: false,
+                    };
+                    self.var_metadata.insert(name.clone(), var_meta);
+                }
+
+                let decl = Decl::DestructureDecl {
+                    visibility,
+                    editability,
+                    type_node: type_name,
+                    pattern,
+                    assignments,
+                    assign_op,
+                };
+
+                let has_blocks = pre_name_block.is_some()
+                    || post_name_block.is_some()
+                    || post_val_block.is_some();
+                if !has_blocks {
+                    return Ok(Stmt::Declaration(decl));
+                }
+
+                let mut spliced = Vec::new();
+                if let Some(b) = pre_name_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                if let Some(b) = post_name_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                spliced.push(Stmt::Declaration(decl));
+                if let Some(b) = post_val_block {
+                    spliced.push(Stmt::ExpressionStmt(b));
+                }
+                Ok(Stmt::Splice(spliced))
+            }
         }
     }
 

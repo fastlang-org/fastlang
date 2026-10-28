@@ -757,6 +757,139 @@ impl SemanticAnalyzer {
                             }
                         }
                     }
+
+                    // --- Uniform Function Call Syntax (UFCS) Fallback ---
+                    // If the method was not found on `object`'s type, check if `property` is a free function
+                    // whose first parameter accepts `object`.
+                    let mut ufcs_arg_types = vec![obj_type.clone()];
+                    for arg in args {
+                        ufcs_arg_types.push(self.visit_expression(arg)?);
+                    }
+
+                    if let Some(sigs) = self.fn_overloads.get(property).cloned() {
+                        let mut best_match: Option<String> = None;
+                        // Pass 1: Concrete matching
+                        for sig in &sigs {
+                            let is_variadic = sig.params.last().map(|p| p.is_variadic).unwrap_or(false);
+                            let min_args = sig.params.iter().take_while(|p| p.default_value.is_none() && !p.is_variadic).count();
+                            let max_args = if is_variadic { usize::MAX } else { sig.params.len() };
+                            if ufcs_arg_types.len() >= min_args && ufcs_arg_types.len() <= max_args {
+                                let get_param = |idx: usize| -> &Param {
+                                    if idx < sig.params.len() {
+                                        &sig.params[idx]
+                                    } else {
+                                        sig.params.last().unwrap()
+                                    }
+                                };
+                                let has_generic = (0..ufcs_arg_types.len()).any(|i| {
+                                    matches!(get_param(i).type_node, BaseType::GenericParam(_))
+                                });
+                                if !has_generic {
+                                    let matches = (0..ufcs_arg_types.len()).all(|i| {
+                                        let p = get_param(i);
+                                        let a_ty = &ufcs_arg_types[i];
+                                        self.types_are_compatible(&p.type_node.as_str(), a_ty)
+                                    });
+                                    if matches {
+                                        let sig_key = crate::middle_end::semantic::analyzer::decl::make_sig_key(property, &sig.params);
+                                        self.record_dependency(sig_key);
+                                        self.record_dependency(property.clone());
+                                        self.record_type_dependencies(&sig.return_type);
+                                        for p in &sig.params {
+                                            self.record_type_dependencies(&p.type_node);
+                                        }
+                                        best_match = Some(sig.return_type.as_str());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Pass 2: Generic matching
+                        if best_match.is_none() {
+                            for sig in &sigs {
+                                let is_variadic = sig.params.last().map(|p| p.is_variadic).unwrap_or(false);
+                                let min_args = sig.params.iter().take_while(|p| p.default_value.is_none() && !p.is_variadic).count();
+                                let max_args = if is_variadic { usize::MAX } else { sig.params.len() };
+                                if ufcs_arg_types.len() >= min_args && ufcs_arg_types.len() <= max_args {
+                                    let get_param = |idx: usize| -> &Param {
+                                        if idx < sig.params.len() {
+                                            &sig.params[idx]
+                                        } else {
+                                            sig.params.last().unwrap()
+                                        }
+                                    };
+                                    let mut gen_bindings: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                                    let mut matches = true;
+                                    for (i, a_ty) in ufcs_arg_types.iter().enumerate() {
+                                        let p = get_param(i);
+                                        if let BaseType::GenericParam(g_name) = &p.type_node {
+                                            if !g_name.starts_with("...") {
+                                                if let Some(existing) = gen_bindings.get(g_name) {
+                                                    if !self.types_are_compatible(existing, a_ty) {
+                                                        matches = false;
+                                                        break;
+                                                    }
+                                                } else {
+                                                    gen_bindings.insert(g_name.clone(), a_ty.clone());
+                                                }
+                                            }
+                                        } else if !self.types_are_compatible(&p.type_node.as_str(), a_ty) {
+                                            matches = false;
+                                            break;
+                                        }
+                                    }
+                                    if matches {
+                                        let sig_key = crate::middle_end::semantic::analyzer::decl::make_sig_key(property, &sig.params);
+                                        self.record_dependency(sig_key);
+                                        self.record_dependency(property.clone());
+                                        self.record_type_dependencies(&sig.return_type);
+                                        for p in &sig.params {
+                                            self.record_type_dependencies(&p.type_node);
+                                        }
+                                        let generic_map = resolve_call_generics(
+                                            &sig.generics,
+                                            &sig.params,
+                                            &call_generics,
+                                            &ufcs_arg_types,
+                                        );
+                                        let resolved_ret = sig.return_type.substitute_generics(&generic_map);
+                                        best_match = Some(resolved_ret.as_str());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(ret) = best_match {
+                            return Ok(ret);
+                        }
+                    }
+
+                    let env_fn_info = self.current_env.borrow().lookup(property).and_then(|info| {
+                        if let SymbolKind::Variable { type_node, .. } = &info.kind {
+                            match type_node {
+                                BaseType::Fn { params, return_type, .. }
+                                | BaseType::Function { params, return_type, .. } => {
+                                    Some((params.clone(), return_type.clone()))
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some((params, return_type)) = env_fn_info {
+                        if params.len() == ufcs_arg_types.len() {
+                            let matches = (0..ufcs_arg_types.len()).all(|i| {
+                                self.types_are_compatible(&params[i].as_str(), &ufcs_arg_types[i])
+                            });
+                            if matches {
+                                self.record_dependency(property.clone());
+                                return Ok(return_type.as_str());
+                            }
+                        }
+                    }
                 }
                 let mut arg_types = Vec::new();
                 for arg in args {
@@ -1995,6 +2128,14 @@ impl SemanticAnalyzer {
                 self.leave_scope();
                 res
             }
+            Expr::InPlaceBlock { body } => {
+                self.enter_scope();
+                for stmt in body {
+                    self.visit_statement(stmt)?;
+                }
+                self.leave_scope();
+                Ok("void".to_string())
+            }
             Expr::LiteralUString(_) => Ok("ustr".to_string()),
             Expr::ForeignBlock { kind, chunks } => {
                 for chunk in chunks {
@@ -2013,7 +2154,7 @@ impl SemanticAnalyzer {
                 match kind {
                     ForeignKind::Html => Ok("HtmlDocument".to_string()),
                     ForeignKind::Json => Ok("JsonDocument".to_string()),
-                    ForeignKind::Safe | ForeignKind::Raw => Ok("array<char>".to_string()),
+                    ForeignKind::Safe | ForeignKind::Raw => Ok("str".to_string()),
                 }
             }
         }

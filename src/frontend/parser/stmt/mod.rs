@@ -15,6 +15,13 @@ impl Parser {
                 self.advance();
                 return Ok(None);
             }
+            TokenKind::DoubleLBrace => {
+                let expr = self.parse_inplace_block()?;
+                if self.peek().kind == TokenKind::SemiColon {
+                    self.advance();
+                }
+                return Ok(Some(Stmt::ExpressionStmt(expr)));
+            }
             TokenKind::Import => self.parse_import_stmt().map(Stmt::Declaration),
             TokenKind::Public => self.parse_exported_stmt().map(Stmt::Declaration),
             TokenKind::Extern => self.parse_extern_decl().map(Stmt::Declaration),
@@ -27,7 +34,8 @@ impl Parser {
                     self.advance(); // consume 'const'
                     self.parse_named_destructure_decl(Editability::NotEditable, scope)
                 } else {
-                    self.parse_const(scope).map(Stmt::Declaration)
+                    self.advance(); // consume 'const'
+                    self.parse_var_decl_statement_with_const(scope, true)
                 }
             }
             TokenKind::TypeInt(_)
@@ -52,13 +60,13 @@ impl Parser {
                         }
                     }
                 }
-                self.parse_var_decl(scope).map(Stmt::Declaration)
+                self.parse_var_decl_statement(scope)
             }
             TokenKind::TypeFn
             | TokenKind::TypeLambda
             | TokenKind::TypeNumber
             | TokenKind::TypeType
-            | TokenKind::TypeAuto => self.parse_var_decl(scope).map(Stmt::Declaration),
+            | TokenKind::TypeAuto => self.parse_var_decl_statement(scope),
 
             TokenKind::TypeFunction => {
                 if let Some(next) = self.tokens.get(self.current + 1) {
@@ -82,7 +90,7 @@ impl Parser {
                         }
                     }
                 }
-                self.parse_var_decl(scope).map(Stmt::Declaration)
+                self.parse_var_decl_statement(scope)
             }
 
             TokenKind::TypeObject => {
@@ -137,7 +145,7 @@ impl Parser {
                         }
                     }
                 }
-                self.parse_var_decl(scope).map(Stmt::Declaration)
+                self.parse_var_decl_statement(scope)
             }
 
             TokenKind::Using => self.parse_using_stmt(),
@@ -451,7 +459,7 @@ impl Parser {
                 self.parse_named_destructure_decl(Editability::Editable, scope)
             }
             TokenKind::Identifier(_) if self.is_var_decl_start() => {
-                self.parse_var_decl(scope).map(Stmt::Declaration)
+                self.parse_var_decl_statement(scope)
             }
             TokenKind::Identifier(_) if self.is_block_decl_start() => {
                 self.parse_bare_block_decl().map(Stmt::Declaration)

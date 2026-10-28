@@ -224,7 +224,6 @@ impl Parser {
     }
 
     pub(crate) fn parse_for_in_stmt_body(&mut self, has_paren: bool) -> Result<Stmt, String> {
-        self.consume_optional_let();
         let item = if self.is_var_decl_start() {
             self.parse_var_decl(ScopeType::Block).map(Stmt::Declaration)?
         } else {

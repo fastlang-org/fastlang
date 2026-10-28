@@ -60,6 +60,14 @@ impl Interpreter {
 
     pub fn eval_stmt(&mut self, stmt: &Stmt) -> Result<Option<Expr>, String> {
         match stmt {
+            Stmt::Splice(stmts) => {
+                for s in stmts {
+                    if let Some(ret) = self.eval_stmt(s)? {
+                        return Ok(Some(ret));
+                    }
+                }
+                Ok(None)
+            }
             Stmt::CompileValidation { body, args } => {
                 let old_compile_block = self.in_compile_block;
                 self.in_compile_block = true;

@@ -735,25 +735,35 @@ impl Scanner {
                 }
             }
             '{' => {
-                if self.at_f_pending {
-                    self.at_f_pending = false;
-                    self.code_brace_stack.push(1);
-                } else if !self.code_brace_stack.is_empty() {
-                    *self.code_brace_stack.last_mut().unwrap() += 1;
+                if let Some('{') = self.peek() {
+                    self.advance();
+                    TokenKind::DoubleLBrace
+                } else {
+                    if self.at_f_pending {
+                        self.at_f_pending = false;
+                        self.code_brace_stack.push(1);
+                    } else if !self.code_brace_stack.is_empty() {
+                        *self.code_brace_stack.last_mut().unwrap() += 1;
+                    }
+                    TokenKind::LBrace
                 }
-                TokenKind::LBrace
             }
             '}' => {
-                if let Some(top) = self.code_brace_stack.last_mut() {
-                    *top -= 1;
-                    if *top == 0 {
-                        self.code_brace_stack.pop();
-                        if !self.template_stack.is_empty() {
-                            self.in_template = true;
+                if let Some('}') = self.peek() {
+                    self.advance();
+                    TokenKind::DoubleRBrace
+                } else {
+                    if let Some(top) = self.code_brace_stack.last_mut() {
+                        *top -= 1;
+                        if *top == 0 {
+                            self.code_brace_stack.pop();
+                            if !self.template_stack.is_empty() {
+                                self.in_template = true;
+                            }
                         }
                     }
+                    TokenKind::RBrace
                 }
-                TokenKind::RBrace
             }
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,

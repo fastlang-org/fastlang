@@ -778,8 +778,12 @@ impl Parser {
             TokenKind::String(s) => {
                 let val = s.clone();
                 self.advance();
-
-                Ok(Expr::LiteralString(val.to_string()))
+                self.parse_interpolated_string(&val)
+            }
+            TokenKind::TemplateText(t) => {
+                let val = t.clone();
+                self.advance();
+                self.parse_interpolated_string(&val)
             }
             TokenKind::UString(s) => {
                 let val = s.clone();
@@ -799,6 +803,7 @@ impl Parser {
 
                 Ok(Expr::LiteralUChar(val))
             }
+            TokenKind::DoubleLBrace => self.parse_inplace_block(),
             TokenKind::Bool(b) => {
                 let val = *b;
                 self.advance();
@@ -1839,6 +1844,9 @@ impl Parser {
 
         while !self.is_at_end() && self.peek().kind != TokenKind::RBrace {
             match self.parse_statement(ScopeType::Block) {
+                Ok(Some(Stmt::Splice(list))) => {
+                    stmts.extend(list);
+                }
                 Ok(Some(stmt)) => {
                     if self.peek().kind == TokenKind::RBrace {
                         if let Stmt::ExpressionStmt(expr) = stmt {
@@ -1866,6 +1874,33 @@ impl Parser {
             statements: stmts,
             final_expr,
         })
+    }
+
+    pub(crate) fn parse_inplace_block(&mut self) -> Result<Expr, String> {
+        self.consume(TokenKind::DoubleLBrace, "Expected '{{' to open in-place block")?;
+        self.inplace_block_depth += 1;
+        let mut stmts = Vec::new();
+
+        while !self.is_at_end() && self.peek().kind != TokenKind::DoubleRBrace {
+            match self.parse_statement(ScopeType::Block) {
+                Ok(Some(Stmt::Splice(list))) => {
+                    stmts.extend(list);
+                }
+                Ok(Some(stmt)) => {
+                    stmts.push(stmt);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    self.inplace_block_depth = self.inplace_block_depth.saturating_sub(1);
+                    return Err(e);
+                }
+            }
+        }
+
+        self.inplace_block_depth = self.inplace_block_depth.saturating_sub(1);
+        self.consume(TokenKind::DoubleRBrace, "Expected '}}' to close in-place block")?;
+
+        Ok(Expr::InPlaceBlock { body: stmts })
     }
 
     pub(crate) fn try_match_infix_macro(&mut self, lhs: Expr, min_bp: u8) -> Result<Option<Expr>, String> {
@@ -2021,5 +2056,69 @@ impl Parser {
             }
         }
         Ok(None)
+    }
+
+    pub(crate) fn parse_interpolated_string(&mut self, text: &str) -> Result<Expr, String> {
+        if !text.contains("{{") || !text.contains("}}") {
+            return Ok(Expr::LiteralString(text.to_string()));
+        }
+
+        let mut chunks = Vec::new();
+        let mut rest = text;
+
+        while let Some(start_idx) = rest.find("{{") {
+            let prefix = &rest[..start_idx];
+            if !prefix.is_empty() {
+                chunks.push(ForeignChunk::Static(prefix.to_string()));
+            }
+
+            let after_open = &rest[start_idx + 2..];
+            let end_idx = match after_open.find("}}") {
+                Some(idx) => idx,
+                None => {
+                    return Err("Unclosed in-place block '{{' inside string literal".to_string());
+                }
+            };
+
+            let inner = after_open[..end_idx].trim();
+            if !inner.is_empty() {
+                let sub_tokens = crate::frontend::lexer::scanner::Scanner::scan_all(inner);
+                let mut sub_parser = Parser::new_with_aliases(sub_tokens, self.type_aliases.clone());
+                if inner.starts_with("for ")
+                    || inner.starts_with("while ")
+                    || (inner.contains(';') && !inner.starts_with('{'))
+                {
+                    let mut stmts = Vec::new();
+                    while !sub_parser.is_at_end() {
+                        if let Some(s) = sub_parser.parse_statement(ScopeType::Block)? {
+                            stmts.push(s);
+                        }
+                    }
+                    chunks.push(ForeignChunk::Statements(stmts));
+                } else {
+                    let sub_expr = sub_parser.parse_expression()?;
+                    let handle_expr = match sub_expr {
+                        Expr::LiteralString(_) => sub_expr,
+                        _ => Expr::HandleCall {
+                            object: Box::new(sub_expr),
+                            handle_name: "display".to_string(),
+                            args: Vec::new(),
+                        },
+                    };
+                    chunks.push(ForeignChunk::Interpolation(Box::new(handle_expr)));
+                }
+            }
+
+            rest = &after_open[end_idx + 2..];
+        }
+
+        if !rest.is_empty() {
+            chunks.push(ForeignChunk::Static(rest.to_string()));
+        }
+
+        Ok(Expr::ForeignBlock {
+            kind: ForeignKind::Safe,
+            chunks,
+        })
     }
 }

@@ -22,6 +22,7 @@ pub struct CodeGenerator {
     pub(crate) current_class_name: Option<String>,
     pub(crate) current_fn_name: Option<String>,
     pub(crate) fn_return_types: HashMap<String, String>,
+    pub(crate) fn_param_types: HashMap<String, Vec<Vec<String>>>,
     pub(crate) primitive_impl_methods: HashMap<String, Vec<String>>,
     pub(crate) in_primitive_impl: bool,
     pub(crate) current_primitive_target: Option<String>,
@@ -73,6 +74,7 @@ impl CodeGenerator {
             current_class_name: None,
             current_fn_name: None,
             fn_return_types: HashMap::new(),
+            fn_param_types: HashMap::new(),
             primitive_impl_methods: HashMap::new(),
             in_primitive_impl: false,
             current_primitive_target: None,
@@ -640,14 +642,19 @@ impl CodeGenerator {
                 let cpp_t = type_to_cpp(t);
                 self.type_aliases.insert(name.clone(), cpp_t);
             } else if let Stmt::Declaration(Decl::FnDecl {
-                name, return_type, ..
+                name, return_type, params, ..
             }) = stmt
             {
                 let cpp_t = type_to_cpp(return_type);
                 self.fn_return_types.insert(name.clone(), cpp_t);
+                let pts: Vec<String> = params.iter().map(|p| type_to_cpp(&p.type_node)).collect();
+                self.fn_param_types.entry(name.clone()).or_default().push(pts);
             } else if let Stmt::Declaration(Decl::FnAliasDecl { name, target, .. }) = stmt {
                 if let Some(cpp_t) = self.fn_return_types.get(target).cloned() {
                     self.fn_return_types.insert(name.clone(), cpp_t);
+                }
+                if let Some(pts) = self.fn_param_types.get(target).cloned() {
+                    self.fn_param_types.entry(name.clone()).or_default().extend(pts);
                 }
             } else if let Stmt::Declaration(Decl::ExternBlockDecl { header, decls, .. }) = stmt {
                 if let Some(hdr) = header {
@@ -1427,6 +1434,8 @@ impl CodeGenerator {
                         param_strs.join(", ")
                     ));
                     self.forward_declared_fns.insert(name.clone());
+                    let pts: Vec<String> = params.iter().map(|p| type_to_cpp(&p.type_node)).collect();
+                    self.fn_param_types.entry(name.clone()).or_default().push(pts);
                 }
             }
         }

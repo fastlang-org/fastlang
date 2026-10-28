@@ -236,6 +236,38 @@ fn test_function_aliasing() -> void {
     println("alias_calc: ", num); // EXPECT: alias_calc: 40
 }
 
+struct UfcsPoint { 
+    int x; 
+    int y;
+}
+fn sum_coords(p: UfcsPoint) -> int32 {
+    return p.x + p.y;
+}
+
+fn test_ufcs() -> void {
+    int32 n = 10;
+    int32 r1 = n.add_vals(20);
+    println("ufcs add_vals: ", r1); // EXPECT: ufcs add_vals: 30
+
+    int32 r2 = n.compute();
+    println("ufcs compute def: ", r2); // EXPECT: ufcs compute def: 20
+
+    int32 r3 = n.compute(5);
+    println("ufcs compute arg: ", r3); // EXPECT: ufcs compute arg: 50
+
+    int32 r4 = 5.factorial();
+    println("ufcs factorial: ", r4); // EXPECT: ufcs factorial: 120
+
+    UfcsPoint pt;
+    pt.x = 100;
+    pt.y = 200;
+    int32 pt_sum = pt.sum_coords();
+    println("ufcs struct: ", pt_sum); // EXPECT: ufcs struct: 300
+
+    int32 chained = 10.add_vals(20).add_vals(30);
+    println("ufcs chained: ", chained); // EXPECT: ufcs chained: 60
+}
+
 fn main() -> int32 {
     test_overloading_and_defaults();
     test_recursion();
@@ -247,6 +279,7 @@ fn main() -> int32 {
     test_implicit_returns();
     test_isolated_blocks();
     test_function_aliasing();
+    test_ufcs();
     println("ALL 03_FUNCTIONS TESTS PASSED"); // EXPECT: ALL 03_FUNCTIONS TESTS PASSED
     return 0;
 }

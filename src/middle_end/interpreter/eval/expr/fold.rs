@@ -1157,6 +1157,9 @@ impl Interpreter {
                     self.fold_expr(fe)?;
                 }
             }
+            Expr::InPlaceBlock { body } => {
+                self.evaluate_ast(body)?;
+            }
             _ => {}
         }
         Ok(())

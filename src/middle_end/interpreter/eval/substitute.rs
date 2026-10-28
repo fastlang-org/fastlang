@@ -240,6 +240,9 @@ pub fn substitute_expr(expr: &Expr, param_map: &HashMap<String, Expr>) -> Expr {
                 })
                 .collect(),
         },
+        Expr::InPlaceBlock { body } => Expr::InPlaceBlock {
+            body: body.iter().map(|s| substitute_stmt(s, param_map)).collect(),
+        },
     }
 }
 
@@ -398,6 +401,9 @@ pub fn substitute_stmt(stmt: &Stmt, param_map: &HashMap<String, Expr>) -> Stmt {
         },
         Stmt::UsingStmt(s) => Stmt::UsingStmt(s.clone()),
         Stmt::SetNamespace(s) => Stmt::SetNamespace(s.clone()),
+        Stmt::Splice(stmts) => Stmt::Splice(
+            stmts.iter().map(|s| substitute_stmt(s, param_map)).collect(),
+        ),
     }
 }
 
